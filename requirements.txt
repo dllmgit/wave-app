@@ -1,0 +1,10 @@
+dash>=2.14.0
+dash-core-components>=2.0.0
+dash-html-components>=2.0.0
+dash-renderer>=1.9.1
+flask>=3.0.0
+gunicorn>=21.2.0
+pandas>=2.0.0
+numpy>=1.24.0
+yfinance>=0.2.30
+plotly>=5.18.0

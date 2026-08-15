@@ -1,0 +1,9 @@
+services:
+  - type: web
+    name: wave-app
+    env: python
+    buildCommand: "g++ -O3 wave_engine.cpp -o wave_engine && pip install -r requirements.txt"
+    startCommand: "gunicorn app_web:server"
+    envVars:
+      - key: PORT
+        value: 10000
