@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
 app = Flask(__name__)
+server = app
 
 def fetch_stock_data(ticker_symbol, period="1y"):
     """使用 yfinance 擷取完整歷史數據。"""
