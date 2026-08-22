@@ -8,7 +8,7 @@ import requests
 # 1. 配置 Telegram Bot 資訊
 # ---------------------------------------------------------
 TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-TELEGRAM_CHAT_ID = "＠Peter5041"
+TELEGRAM_CHAT_ID = "YOUR_TELEGRAM_CHAT_ID"
 
 # ---------------------------------------------------------
 # 2. 載入 C++ 動態連結庫 (DLL / .so)
