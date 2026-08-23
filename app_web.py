@@ -64,9 +64,19 @@ HK_POOL = [
     ]
 ]
 
+# 頂行要顯示的所有形態與指標
+PATTERN_COLUMNS = [
+    {"key": "triangle", "name": "三角形形態"},
+    {"key": "head_shoulders", "name": "頭肩頂/底"},
+    {"key": "double_top_bottom", "name": "雙頂/雙底"},
+    {"key": "candlestick", "name": "K線轉向形態"},
+    {"key": "trendline_break", "name": "趨勢線突破"},
+    {"key": "w3_vol_pass", "name": "浪三爆量驗證"},
+]
+
 
 def fetch_stock_quote(ticker):
-    """使用原生 HTTP 請求獲取行情，免額外套件"""
+    """擷取行情以計算成交量/額進行去重排序"""
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d"
         req = urllib.request.Request(
@@ -78,48 +88,42 @@ def fetch_stock_quote(ticker):
             meta = result["meta"]
             close = meta.get("regularMarketPrice", 0.0)
             volume = meta.get("regularMarketVolume", 0)
-            turnover = close * volume
             return {
                 "ticker": ticker,
                 "name": ticker,
                 "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
                 "latest_close": close,
+                "latest_turnover": close * volume,
                 "latest_volume": volume,
-                "latest_turnover": turnover,
             }
-    except Exception as e:
-        print(f"獲取 {ticker} 數據失敗: {e}")
+    except Exception:
         return {
             "ticker": ticker,
             "name": ticker,
             "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
             "latest_close": 0.0,
-            "latest_volume": 0,
             "latest_turnover": 0,
+            "latest_volume": 0,
         }
 
 
 def get_top_50_merged():
-    """抓取並整合成交額 Top 50 及成交量 Top 50 (去重)"""
-    stock_list = []
-    for ticker in HK_POOL:
-        quote = fetch_stock_quote(ticker)
-        stock_list.append(quote)
-
+    stock_list = [fetch_stock_quote(t) for t in HK_POOL]
     top_turnover = sorted(
         stock_list, key=lambda x: x["latest_turnover"], reverse=True
     )[:50]
     top_volume = sorted(
         stock_list, key=lambda x: x["latest_volume"], reverse=True
     )[:50]
-
     merged = {s["ticker"]: s for s in top_turnover + top_volume}
     return list(merged.values())
 
 
 def analyze_pattern(stock_info):
-    """呼叫 C++ 引擎檢查型態與指標"""
+    """執行 C++ 引擎並將觸發的形態對應到各個指標方格中"""
     ticker = stock_info["ticker"]
+    matches = {p["key"]: False for p in PATTERN_COLUMNS}
+
     try:
         subprocess.run(["./pattern_engine", ticker], check=True)
         if os.path.exists("result_top3.json"):
@@ -131,24 +135,37 @@ def analyze_pattern(stock_info):
                     res["scenarios"][0] if res.get("scenarios") else {}
                 )
                 signals = top_scenario.get("signals", [])
+                sig_text = " ".join([s.get("type", "") for s in signals])
 
-                stock_info["has_pattern"] = len(signals) > 0
-                stock_info["signals_text"] = (
-                    ", ".join([s["type"] for s in signals])
-                    if signals
-                    else "無符合型態"
+                # 判定各個型態欄位是否符合 (符合記為 True)
+                if (
+                    "Triangle" in sig_text
+                    or "narrowing" in sig_text
+                    or "broadening" in sig_text
+                ):
+                    matches["triangle"] = True
+                if "Head" in sig_text or "Shoulders" in sig_text:
+                    matches["head_shoulders"] = True
+                if "Double" in sig_text:
+                    matches["double_top_bottom"] = True
+                if (
+                    "Hammer" in sig_text
+                    or "Star" in sig_text
+                    or "Engulfing" in sig_text
+                ):
+                    matches["candlestick"] = True
+                if "Trendline" in sig_text or "Break" in sig_text:
+                    matches["trendline_break"] = True
+
+                matches["w3_vol_pass"] = top_scenario.get(
+                    "w3_vol_pass", False
                 )
-                stock_info["w3_pass"] = top_scenario.get("w3_vol_pass", False)
                 stock_info["win_rate"] = top_scenario.get("win_rate", 0.0)
-                stock_info["is_matched"] = (
-                    stock_info["has_pattern"] or stock_info["w3_pass"]
-                )
-                return stock_info
     except Exception as e:
         print(f"分析 {ticker} 失敗: {e}")
 
-    stock_info["is_matched"] = False
-    stock_info["signals_text"] = "未觸發"
+    stock_info["matches"] = matches
+    stock_info["has_any_match"] = any(matches.values())
     return stock_info
 
 
@@ -169,16 +186,16 @@ def index():
             stock_info = fetch_stock_quote(custom_ticker)
             custom_result = analyze_pattern(stock_info)
 
-    # 1. 自動篩選最高成交額/量 Top 50 並去重
+    # 1. 取最高成交量與成交額 Top 50 聯集去重
     unique_pool = get_top_50_merged()
 
-    # 2. 進行型態檢查
+    # 2. 進行型態分析
     analyzed_stocks = [analyze_pattern(s) for s in unique_pool]
 
-    # 3. 符合排序：符合指定型態/指標者排最上方，未符合者放下端
+    # 3. 有符合任意指標的排列表格上端，無則放下端
     analyzed_stocks.sort(
         key=lambda x: (
-            1 if x.get("is_matched") else 0,
+            1 if x.get("has_any_match") else 0,
             x.get("latest_turnover", 0),
         ),
         reverse=True,
@@ -190,51 +207,45 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>指定型態與指標檢查系統</title>
+        <title>形態與指標檢查矩陣</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f6f9; padding: 20px; color: #333; }
-            .container { max-width: 1250px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+            .container { max-width: 1300px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
             h1 { color: #1a365d; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
             
-            .legend-box { background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #cbd5e0; }
-            .legend-item { display: inline-block; margin-right: 25px; font-weight: bold; font-size: 0.9em; }
+            .legend-box { background: #f8fafc; padding: 12px 18px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #cbd5e0; font-size: 0.95em; }
             
             .search-box { background: #edf2f7; padding: 15px; border-radius: 8px; margin-bottom: 20px; }
             .search-box input { padding: 8px 12px; width: 220px; border: 1px solid #cbd5e0; border-radius: 4px; }
             .search-box button { padding: 8px 16px; background: #2b6cb0; color: white; border: none; border-radius: 4px; font-weight: bold; cursor: pointer; }
             
             table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
-            th { background-color: #edf2f7; color: #2d3748; }
+            th, td { padding: 12px; text-align: center; border: 1px solid #e2e8f0; }
+            th { background-color: #2b6cb0; color: white; font-weight: 600; }
+            td.left-align { text-align: left; }
             
-            tr.matched { background-color: #f0fff4; font-weight: 500; }
+            tr.matched { background-color: #f0fff4; }
             tr.matched:hover { background-color: #dcffe4; }
-            tr.unmatched { background-color: #ffffff; color: #718096; }
+            tr.unmatched { background-color: #ffffff; }
             tr.unmatched:hover { background-color: #f7fafc; }
             
-            .badge { padding: 4px 8px; border-radius: 4px; font-size: 0.85em; font-weight: bold; }
-            .badge-match { background: #38a169; color: white; }
-            .badge-none { background: #edf2f7; color: #a0aec0; }
-            .badge-pass { background: #c6f6d5; color: #22543d; }
-            .tv-btn { display: inline-block; padding: 6px 12px; background: #2962ff; color: white; border-radius: 4px; text-decoration: none; font-size: 0.85em; font-weight: bold; }
+            .check-icon { color: #2e7d32; font-size: 1.2em; font-weight: bold; }
+            .tv-btn { display: inline-block; padding: 5px 10px; background: #2962ff; color: white; border-radius: 4px; text-decoration: none; font-size: 0.85em; font-weight: bold; }
         </style>
     </head>
     <body>
         <div class="container">
-            <h1>🔍 指定型態與指標檢查清單</h1>
+            <h1>🔍 技術形態與指標檢查矩陣</h1>
 
-            <!-- 圖例區 -->
+            <!-- 圖例說明 -->
             <div class="legend-box">
-                <strong>📌 圖例說明：</strong><br><br>
-                <div class="legend-item"><span class="badge badge-match">🎯 符合型態</span> 觸發指標/型態條件（已排列於列表最上端）</div>
-                <div class="legend-item"><span class="badge badge-none">⚪ 未符合</span> 未觸發指標條件（排列於列表下端）</div>
-                <div class="legend-item"><span class="badge badge-pass">✅ 放量確認</span> 浪三成交量高於浪一成交量</div>
+                <strong>📌 圖例說明：</strong> 方格顯示 <strong>✅</strong> 代表符合該項指標條件；未符合則保持留空。符合條件之股票已優先排列於上端。
             </div>
 
-            <!-- 自訂輸入 -->
+            <!-- 手動查詢股票 -->
             <div class="search-box">
                 <form method="POST">
-                    <label for="ticker"><strong>手動指定檢查股票：</strong></label>
+                    <label for="ticker"><strong>手動指定股票號碼：</strong></label>
                     <input type="text" id="ticker" name="ticker" placeholder="例如: 0700.HK" required>
                     <button type="submit">執行檢查</button>
                 </form>
@@ -244,50 +255,41 @@ def index():
             <div style="background: #fffaf0; border: 1px solid #feebc8; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
                 <h3>🎯 手動查詢結果: {{ custom.ticker }}</h3>
                 <p>
-                    <strong>觸發型態：</strong> {{ custom.signals_text }} | 
-                    <strong>成交金額：</strong> ${{ "{:,.0f}".format(custom.latest_turnover or 0) }} |
+                    <strong>現價：</strong> ${{ "%.2f"|format(custom.latest_close or 0) }} | 
+                    <strong>歷史勝率：</strong> {{ custom.win_rate or 0 }}% |
                     <a href="https://www.tradingview.com/chart/?symbol={{ custom.tv_symbol }}" target="_blank" class="tv-btn">開啟 TradingView 圖表 📈</a>
                 </p>
             </div>
             {% endif %}
 
-            <h2>📋 檢查結果列表 (成交量/額 Top 50 聯集去重)</h2>
+            <!-- 主表格：型態指標全列於最頂行 -->
             <table>
                 <thead>
                     <tr>
-                        <th>圖例標籤</th>
-                        <th>股票代號</th>
-                        <th>最新價</th>
-                        <th>成交量</th>
-                        <th>成交金額</th>
-                        <th>觸發型態指標</th>
-                        <th>量能驗證</th>
-                        <th>勝率</th>
-                        <th>TradingView</th>
+                        <th style="width: 140px;">股票代號</th>
+                        <th style="width: 90px;">最新價</th>
+                        {% for col in columns %}
+                            <th>{{ col.name }}</th>
+                        {% endfor %}
+                        <th style="width: 80px;">勝率</th>
+                        <th style="width: 100px;">TradingView</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for item in stocks %}
-                    <tr class="{% if item.is_matched %}matched{% else %}unmatched{% endif %}">
-                        <td>
-                            {% if item.is_matched %}
-                                <span class="badge badge-match">🎯 符合型態</span>
-                            {% else %}
-                                <span class="badge badge-none">⚪ 未符合</span>
-                            {% endif %}
-                        </td>
-                        <td><strong>{{ item.ticker }}</strong></td>
+                    <tr class="{% if item.has_any_match %}matched{% else %}unmatched{% endif %}">
+                        <td class="left-align"><strong>{{ item.ticker }}</strong></td>
                         <td>${{ "%.2f"|format(item.latest_close or 0) }}</td>
-                        <td>{{ "{:,.0f}".format(item.latest_volume or 0) }}</td>
-                        <td>${{ "{:,.0f}".format(item.latest_turnover or 0) }}</td>
-                        <td><strong>{{ item.signals_text }}</strong></td>
-                        <td>
-                            {% if item.w3_pass %}
-                                <span class="badge badge-pass">通過 ✅</span>
-                            {% else %}
-                                <span>-</span>
-                            {% endif %}
-                        </td>
+                        
+                        <!-- 檢查每一個型態，符合顯示 ✅，無則留空 -->
+                        {% for col in columns %}
+                            <td>
+                                {% if item.matches[col.key] %}
+                                    <span class="check-icon">✅</span>
+                                {% endif %}
+                            </td>
+                        {% endfor %}
+
                         <td><strong>{{ item.win_rate or 0 }}%</strong></td>
                         <td>
                             <a href="https://www.tradingview.com/chart/?symbol={{ item.tv_symbol }}" target="_blank" class="tv-btn">圖表 📈</a>
@@ -302,7 +304,10 @@ def index():
     """
 
     return render_template_string(
-        html_template, stocks=analyzed_stocks, custom=custom_result
+        html_template,
+        stocks=analyzed_stocks,
+        columns=PATTERN_COLUMNS,
+        custom=custom_result,
     )
 
 
