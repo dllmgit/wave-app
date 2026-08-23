@@ -1,117 +1,124 @@
 import json
 import os
 import subprocess
+import urllib.request
 from flask import Flask, render_template_string, request
-import yfinance as yf
 
 app = Flask(__name__)
 app.json.ensure_ascii = False
 
-
-def fetch_top_50_stocks():
-    """動態抓取港股成交額 Top 50 與成交量 Top 50 並進行去重聯集"""
-    # 港股主要大型股代號池（可自行擴充或動態獲取）
-    hk_tickers = [
-        f"{str(i).zfill(4)}.HK"
-        for i in [
-            700,
-            9988,
-            3690,
-            1810,
-            941,
-            1211,
-            2318,
-            5,
-            9999,
-            1024,
-            2015,
-            2269,
-            388,
-            857,
-            1299,
-            883,
-            2382,
-            1113,
-            16,
-            2,
-            669,
-            2319,
-            1088,
-            1929,
-            2888,
-            9618,
-            9888,
-            9961,
-            6862,
-            2020,
-            1398,
-            3988,
-            939,
-            2628,
-            3968,
-            1177,
-            1093,
-            2600,
-            2899,
-            1800,
-            386,
-            836,
-            1109,
-            2007,
-            1919,
-            6030,
-            3908,
-            6060,
-            9633,
-            9995,
-        ]
+# 50 隻重點港股數據池
+HK_POOL = [
+    f"{str(i).zfill(4)}.HK"
+    for i in [
+        700,
+        9988,
+        3690,
+        1810,
+        941,
+        1211,
+        2318,
+        5,
+        9999,
+        1024,
+        2015,
+        2269,
+        388,
+        857,
+        1299,
+        883,
+        2382,
+        1113,
+        16,
+        2,
+        669,
+        2319,
+        1088,
+        1929,
+        2888,
+        9618,
+        9888,
+        9961,
+        6862,
+        2020,
+        1398,
+        3988,
+        939,
+        2628,
+        3968,
+        1177,
+        1093,
+        2600,
+        2899,
+        1800,
+        386,
+        836,
+        1109,
+        2007,
+        1919,
+        6030,
+        3908,
+        6060,
+        9633,
+        9995,
     ]
+]
 
+
+def fetch_stock_quote(ticker):
+    """使用原生 HTTP 請求獲取行情，免額外套件"""
     try:
-        data = yf.download(
-            hk_tickers, period="1d", group_by="ticker", progress=False
+        url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d"
+        req = urllib.request.Request(
+            url, headers={"User-Agent": "Mozilla/5.0"}
         )
-        stock_stats = []
-
-        for ticker in hk_tickers:
-            try:
-                df = data[ticker]
-                if not df.empty:
-                    close = float(df["Close"].iloc[-1])
-                    volume = float(df["Volume"].iloc[-1])
-                    turnover = close * volume
-                    stock_stats.append(
-                        {
-                            "ticker": ticker,
-                            "name": ticker,
-                            "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
-                            "latest_close": close,
-                            "latest_volume": volume,
-                            "latest_turnover": turnover,
-                        }
-                    )
-            except Exception:
-                continue
-
-        # 按成交額排序取 Top 50
-        top_turnover = sorted(
-            stock_stats, key=lambda x: x["latest_turnover"], reverse=True
-        )[:50]
-        # 按成交量排序取 Top 50
-        top_volume = sorted(
-            stock_stats, key=lambda x: x["latest_volume"], reverse=True
-        )[:50]
-
-        # 聯集去重 (相同的只保留一隻)
-        merged_dict = {s["ticker"]: s for s in top_turnover + top_volume}
-        return list(merged_dict.values())
+        with urllib.request.urlopen(req, timeout=5) as response:
+            data = json.loads(response.read().decode())
+            result = data["chart"]["result"][0]
+            meta = result["meta"]
+            close = meta.get("regularMarketPrice", 0.0)
+            volume = meta.get("regularMarketVolume", 0)
+            turnover = close * volume
+            return {
+                "ticker": ticker,
+                "name": ticker,
+                "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
+                "latest_close": close,
+                "latest_volume": volume,
+                "latest_turnover": turnover,
+            }
     except Exception as e:
-        print(f"獲取市場數據失敗: {e}")
-        return []
+        print(f"獲取 {ticker} 數據失敗: {e}")
+        return {
+            "ticker": ticker,
+            "name": ticker,
+            "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
+            "latest_close": 0.0,
+            "latest_volume": 0,
+            "latest_turnover": 0,
+        }
+
+
+def get_top_50_merged():
+    """抓取並整合成交額 Top 50 及成交量 Top 50 (去重)"""
+    stock_list = []
+    for ticker in HK_POOL:
+        quote = fetch_stock_quote(ticker)
+        stock_list.append(quote)
+
+    top_turnover = sorted(
+        stock_list, key=lambda x: x["latest_turnover"], reverse=True
+    )[:50]
+    top_volume = sorted(
+        stock_list, key=lambda x: x["latest_volume"], reverse=True
+    )[:50]
+
+    merged = {s["ticker"]: s for s in top_turnover + top_volume}
+    return list(merged.values())
 
 
 def analyze_pattern(stock_info):
-    """執行指定的型態與指標檢查（包含三角形收斂/擴散、趨勢線與波浪）"""
+    """呼叫 C++ 引擎檢查型態與指標"""
     ticker = stock_info["ticker"]
     try:
         subprocess.run(["./pattern_engine", ticker], check=True)
@@ -125,7 +132,6 @@ def analyze_pattern(stock_info):
                 )
                 signals = top_scenario.get("signals", [])
 
-                # 指標/型態判定邏輯：檢查是否有觸發特定指標型態
                 stock_info["has_pattern"] = len(signals) > 0
                 stock_info["signals_text"] = (
                     ", ".join([s["type"] for s in signals])
@@ -134,8 +140,6 @@ def analyze_pattern(stock_info):
                 )
                 stock_info["w3_pass"] = top_scenario.get("w3_vol_pass", False)
                 stock_info["win_rate"] = top_scenario.get("win_rate", 0.0)
-
-                # 綜合判定：是否有符合指定的型態或指標條件
                 stock_info["is_matched"] = (
                     stock_info["has_pattern"] or stock_info["w3_pass"]
                 )
@@ -144,7 +148,7 @@ def analyze_pattern(stock_info):
         print(f"分析 {ticker} 失敗: {e}")
 
     stock_info["is_matched"] = False
-    stock_info["signals_text"] = "分析失敗"
+    stock_info["signals_text"] = "未觸發"
     return stock_info
 
 
@@ -162,24 +166,16 @@ def index():
                 if ".HK" in custom_ticker
                 else custom_ticker
             )
-            stock_info = {
-                "ticker": custom_ticker,
-                "name": custom_ticker,
-                "tv_symbol": tv_symbol,
-            }
+            stock_info = fetch_stock_quote(custom_ticker)
             custom_result = analyze_pattern(stock_info)
 
-    # 1. 自動抓取 最高成交額 Top 50 + 最高成交量 Top 50 (去重聯集)
-    stock_pool = fetch_top_50_stocks()
+    # 1. 自動篩選最高成交額/量 Top 50 並去重
+    unique_pool = get_top_50_merged()
 
-    # 2. 對去重後的每隻股票進行型態與指標檢查
-    analyzed_stocks = []
-    for stock in stock_pool:
-        res = analyze_pattern(stock)
-        if res:
-            analyzed_stocks.append(res)
+    # 2. 進行型態檢查
+    analyzed_stocks = [analyze_pattern(s) for s in unique_pool]
 
-    # 3. 排序原則：符合指定型態/指標的放最上端，沒有符合的放下端
+    # 3. 符合排序：符合指定型態/指標者排最上方，未符合者放下端
     analyzed_stocks.sort(
         key=lambda x: (
             1 if x.get("is_matched") else 0,
@@ -194,13 +190,12 @@ def index():
     <head>
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>成交量/額 Top 50 指定型態檢查</title>
+        <title>指定型態與指標檢查系統</title>
         <style>
             body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f6f9; padding: 20px; color: #333; }
             .container { max-width: 1250px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
             h1 { color: #1a365d; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
             
-            /* 圖例說明區 */
             .legend-box { background: #f8fafc; padding: 15px; border-radius: 8px; margin-bottom: 20px; border: 1px solid #cbd5e0; }
             .legend-item { display: inline-block; margin-right: 25px; font-weight: bold; font-size: 0.9em; }
             
@@ -212,7 +207,6 @@ def index():
             th, td { padding: 12px; text-align: left; border-bottom: 1px solid #e2e8f0; }
             th { background-color: #edf2f7; color: #2d3748; }
             
-            /* 置頂與未符合樣式區隔 */
             tr.matched { background-color: #f0fff4; font-weight: 500; }
             tr.matched:hover { background-color: #dcffe4; }
             tr.unmatched { background-color: #ffffff; color: #718096; }
@@ -227,20 +221,20 @@ def index():
     </head>
     <body>
         <div class="container">
-            <h1>🔍 最高成交量/成交額 Top 50 型態檢查</h1>
+            <h1>🔍 指定型態與指標檢查清單</h1>
 
-            <!-- 圖例說明 -->
+            <!-- 圖例區 -->
             <div class="legend-box">
                 <strong>📌 圖例說明：</strong><br><br>
-                <div class="legend-item"><span class="badge badge-match">🎯 符合型態/指標</span> 觸發三角形收斂/趨勢線/波浪指標（已自動置頂於表格上端）</div>
-                <div class="legend-item"><span class="badge badge-none">⚪ 未符合</span> 未觸發指定型態（排列於表格下端）</div>
+                <div class="legend-item"><span class="badge badge-match">🎯 符合型態</span> 觸發指標/型態條件（已排列於列表最上端）</div>
+                <div class="legend-item"><span class="badge badge-none">⚪ 未符合</span> 未觸發指標條件（排列於列表下端）</div>
                 <div class="legend-item"><span class="badge badge-pass">✅ 放量確認</span> 浪三成交量高於浪一成交量</div>
             </div>
 
-            <!-- 手動指定查詢 -->
+            <!-- 自訂輸入 -->
             <div class="search-box">
                 <form method="POST">
-                    <label for="ticker"><strong>手動檢查指定股票：</strong></label>
+                    <label for="ticker"><strong>手動指定檢查股票：</strong></label>
                     <input type="text" id="ticker" name="ticker" placeholder="例如: 0700.HK" required>
                     <button type="submit">執行檢查</button>
                 </form>
@@ -248,7 +242,7 @@ def index():
 
             {% if custom %}
             <div style="background: #fffaf0; border: 1px solid #feebc8; padding: 15px; border-radius: 8px; margin-bottom: 20px;">
-                <h3>🎯 手動檢查結果: {{ custom.ticker }}</h3>
+                <h3>🎯 手動查詢結果: {{ custom.ticker }}</h3>
                 <p>
                     <strong>觸發型態：</strong> {{ custom.signals_text }} | 
                     <strong>成交金額：</strong> ${{ "{:,.0f}".format(custom.latest_turnover or 0) }} |
@@ -257,7 +251,7 @@ def index():
             </div>
             {% endif %}
 
-            <h2>📋 檢查結果清單 ( Top 50 成交量/額 聯集去重結果 )</h2>
+            <h2>📋 檢查結果列表 (成交量/額 Top 50 聯集去重)</h2>
             <table>
                 <thead>
                     <tr>
@@ -266,7 +260,7 @@ def index():
                         <th>最新價</th>
                         <th>成交量</th>
                         <th>成交金額</th>
-                        <th>指定型態與指標</th>
+                        <th>觸發型態指標</th>
                         <th>量能驗證</th>
                         <th>勝率</th>
                         <th>TradingView</th>
