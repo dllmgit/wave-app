@@ -8,7 +8,7 @@
 struct Candle {
     std::string date;
     double open, high, low, close;
-    double volume; // 📊 成交量 (Volume)
+    double volume;
 };
 
 struct PatternSignal {
@@ -31,7 +31,7 @@ struct WaveScenario {
     double stop_loss;          
     std::vector<PatternSignal> signals;
     DuplicatedChannel dup_channel;
-    bool wave3_vol_confirmed; // 量價驗證標籤
+    bool wave3_vol_confirmed;
 };
 
 class MultiPatternEngine {
@@ -107,7 +107,6 @@ public:
         std::vector<WaveScenario> scenarios;
         auto patterns = detectCandlePatterns();
 
-        // 🔍 成交量驗證：判斷 Wave 3 (index 7) 成交量是否大於 Wave 1 (index 3)
         double vol_wave1 = df[3].volume;
         double vol_wave3 = df[7].volume;
         bool w3_vol_pass = (vol_wave3 > vol_wave1);
@@ -140,7 +139,6 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    // 支援從檔名讀取輸入，否則使用預設
     std::string filename = (argc > 1) ? argv[1] : "input_candles.csv";
     std::vector<Candle> mock_data;
 
@@ -154,7 +152,6 @@ int main(int argc, char* argv[]) {
         in.close();
     }
 
-    // 若無檔案則載入預設 mock 數據
     if (mock_data.empty()) {
         mock_data = {
             {"2026-08-01", 100, 102, 98,  100, 1200000}, 
@@ -209,6 +206,6 @@ int main(int argc, char* argv[]) {
     out << "  ]\n}\n";
     out.close();
 
-    std::cout << "✅ [C++ Engine] 量價融合爆算完成！數據已寫入 result_top3.json" << std::endl;
+    std::cout << "✅ [C++ Engine] 爆算完成！" << std::endl;
     return 0;
 }
