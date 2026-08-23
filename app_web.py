@@ -109,6 +109,21 @@ def fetch_stock_quote(ticker):
 
 def get_top_50_merged():
     stock_list = [fetch_stock_quote(t) for t in HK_POOL]
+
+    # 保障機制：即使數據抓取失敗，也強制回傳原本的股票池清單
+    if not stock_list:
+        return [
+            {
+                "ticker": t,
+                "name": t,
+                "tv_symbol": f"HKEX:{t.split('.')[0]}",
+                "latest_close": 0.0,
+                "latest_turnover": 0,
+                "latest_volume": 0,
+            }
+            for t in HK_POOL
+        ]
+
     top_turnover = sorted(
         stock_list, key=lambda x: x["latest_turnover"], reverse=True
     )[:50]
@@ -123,21 +138,23 @@ def analyze_pattern(stock_info):
     """執行 C++ 引擎並將觸發的形態對應到各個指標方格中"""
     ticker = stock_info["ticker"]
     matches = {p["key"]: False for p in PATTERN_COLUMNS}
+    stock_info["win_rate"] = 0.0
 
     try:
-        subprocess.run(["./pattern_engine", ticker], check=True)
+        # 呼叫 C++ 分析引擎
+        if os.path.exists("./pattern_engine"):
+            subprocess.run(["./pattern_engine", ticker], check=False)
+
         if os.path.exists("result_top3.json"):
             with open("result_top3.json", "r", encoding="utf-8") as f:
                 res = json.load(f)
-                stock_info.update(res)
-
                 top_scenario = (
                     res["scenarios"][0] if res.get("scenarios") else {}
                 )
                 signals = top_scenario.get("signals", [])
                 sig_text = " ".join([s.get("type", "") for s in signals])
 
-                # 判定各個型態欄位是否符合 (符合記為 True)
+                # 比對形態
                 if (
                     "Triangle" in sig_text
                     or "narrowing" in sig_text
@@ -162,8 +179,9 @@ def analyze_pattern(stock_info):
                 )
                 stock_info["win_rate"] = top_scenario.get("win_rate", 0.0)
     except Exception as e:
-        print(f"分析 {ticker} 失敗: {e}")
+        print(f"分析 {ticker} 過程發生異常: {e}")
 
+    # 無論成功失敗，都保證回傳完整結構，不丟棄股票
     stock_info["matches"] = matches
     stock_info["has_any_match"] = any(matches.values())
     return stock_info
@@ -176,23 +194,16 @@ def index():
     if request.method == "POST":
         custom_ticker = request.form.get("ticker", "").strip().upper()
         if custom_ticker:
-            tv_symbol = (
-                custom_ticker
-                if ":" in custom_ticker
-                else f"HKEX:{custom_ticker.split('.')[0]}"
-                if ".HK" in custom_ticker
-                else custom_ticker
-            )
             stock_info = fetch_stock_quote(custom_ticker)
             custom_result = analyze_pattern(stock_info)
 
-    # 1. 取最高成交量與成交額 Top 50 聯集去重
+    # 1. 取得去重股票池
     unique_pool = get_top_50_merged()
 
-    # 2. 進行型態分析
+    # 2. 進行型態分析 (所有股票一律保留)
     analyzed_stocks = [analyze_pattern(s) for s in unique_pool]
 
-    # 3. 有符合任意指標的排列表格上端，無則放下端
+    # 3. 排序：符合任意指標者排最上方，未符合者排下方
     analyzed_stocks.sort(
         key=lambda x: (
             1 if x.get("has_any_match") else 0,
@@ -239,7 +250,7 @@ def index():
 
             <!-- 圖例說明 -->
             <div class="legend-box">
-                <strong>📌 圖例說明：</strong> 方格顯示 <strong>✅</strong> 代表符合該項指標條件；未符合則保持留空。符合條件之股票已優先排列於上端。
+                <strong>📌 圖例說明：</strong> 方格顯示 <strong>✅</strong> 代表符合該項指標條件；未符合則保持留空。所有股票均已完整列出（符合者優先排於表格上方）。
             </div>
 
             <!-- 手動查詢股票 -->
@@ -262,7 +273,7 @@ def index():
             </div>
             {% endif %}
 
-            <!-- 主表格：型態指標全列於最頂行 -->
+            <!-- 主表格 -->
             <table>
                 <thead>
                     <tr>
@@ -281,7 +292,6 @@ def index():
                         <td class="left-align"><strong>{{ item.ticker }}</strong></td>
                         <td>${{ "%.2f"|format(item.latest_close or 0) }}</td>
                         
-                        <!-- 檢查每一個型態，符合顯示 ✅，無則留空 -->
                         {% for col in columns %}
                             <td>
                                 {% if item.matches[col.key] %}
