@@ -1,17 +1,19 @@
 import json
 import os
 import subprocess
-from flask import Flask, jsonify
+from flask import Flask, jsonify, render_template_string
 import requests
 
 app = Flask(__name__)
+
+# 關閉 ASCII 轉義，確保 JSON 能正確顯示中文
+app.json.ensure_ascii = False
 
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "YOUR_TELEGRAM_CHAT_ID")
 
 
 def run_cpp_and_get_data():
-    # 執行 C++ 引擎輸出 JSON
     try:
         subprocess.run(["./pattern_engine"], check=True)
     except Exception as e:
@@ -31,6 +33,8 @@ def index():
         return jsonify({"status": "error", "message": "無法執行 C++ 引擎"}), 500
 
     scenarios = data.get("scenarios", [])
+
+    # 發送 Telegram 通知
     if scenarios and TELEGRAM_BOT_TOKEN != "YOUR_TELEGRAM_BOT_TOKEN":
         top = scenarios[0]
         signals_str = ", ".join(
@@ -63,7 +67,76 @@ def index():
         except Exception as e:
             print(f"Telegram 發送失敗: {e}")
 
-    return jsonify({"status": "success", "data": data})
+    # 以美化過的 HTML 網頁呈現結果
+    html_template = """
+    <!DOCTYPE html>
+    <html lang="zh-TW">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>波浪形態算牌引擎</title>
+        <style>
+            body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background-color: #f4f6f9; padding: 20px; color: #333; }
+            .container { max-width: 900px; margin: 0 auto; background: white; padding: 25px; border-radius: 12px; box-shadow: 0 4px 15px rgba(0,0,0,0.1); }
+            h1 { color: #1a365d; border-bottom: 2px solid #e2e8f0; padding-bottom: 10px; }
+            .card { background: #f8fafc; border-left: 5px solid #3182ce; padding: 15px; margin-bottom: 20px; border-radius: 4px; }
+            .card.rank-1 { border-left-color: #38a169; }
+            .card h3 { margin-top: 0; color: #2d3748; }
+            .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-weight: bold; font-size: 0.85em; }
+            .badge-success { background: #c6f6d5; color: #22543d; }
+            .badge-fail { background: #fed7d7; color: #742a2a; }
+            pre { background: #1a202c; color: #63b3ed; padding: 15px; border-radius: 8px; overflow-x: auto; }
+        </style>
+    </head>
+    <body>
+        <div class="container">
+            <h1>📊 波浪形態與 K 線分析結果</h1>
+            {% for s in scenarios %}
+            <div class="card rank-{{ s.rank }}">
+                <h3>Rank {{ s.rank }}: {{ s.name }}</h3>
+                <p>
+                    <strong>預估勝率：</strong> {{ s.win_rate }}% | 
+                    <strong>盈虧比：</strong> {{ s.rr_ratio }} | 
+                    <strong>目標價 (W5)：</strong> <span style="color: #2b6cb0;">${{ s.target_w5 }}</span> | 
+                    <strong>止損價：</strong> <span style="color: #e53e3e;">${{ s.stop_loss }}</span>
+                </p>
+                <p>
+                    <strong>Wave 3 爆量驗證：</strong> 
+                    {% if s.w3_vol_pass %}
+                        <span class="badge badge-success">通過 ✅</span>
+                    {% else %}
+                        <span class="badge badge-fail">未通過 ❌</span>
+                    {% endif %}
+                </p>
+                <p><strong>觸發形態列表：</strong></p>
+                <ul>
+                    {% for sig in s.signals %}
+                        <li>Index {{ sig.index }}: {{ sig.type }}</li>
+                    {% else %}
+                        <li>無特殊形態</li>
+                    {% endfor %}
+                </ul>
+            </div>
+            {% endfor %}
+
+            <h2>📄 原始 JSON 數據</h2>
+            <pre>{{ raw_json }}</pre>
+        </div>
+    </body>
+    </html>
+    """
+
+    return render_template_string(
+        html_template,
+        scenarios=scenarios,
+        raw_json=json.dumps(data, indent=2, ensure_ascii=False),
+    )
+
+
+@app.route("/api/data")
+def get_raw_json():
+    data = run_cpp_and_get_data()
+    return jsonify(data)
 
 
 if __name__ == "__main__":
