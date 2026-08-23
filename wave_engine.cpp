@@ -68,7 +68,6 @@ private:
             double neck_avg = (df[n1].low + df[n2].low) / 2.0;
             double left_height = df[ls].high - neck_avg;
             double right_height = df[rs].high - neck_avg;
-
             double left_width = n1 - ls;
             double right_width = rs - n2;
 
@@ -116,17 +115,17 @@ public:
 
         scenarios.push_back({
             1, "結果一：最高勝率型 ( Wave 3 爆量確認 + 0.618 回撤)",
-            w3_vol_pass ? 76.5 : 68.0, 2.1, {0, 3, 4, 7, 8}, 195.00, 142.00, patterns, dup1, w3_vol_pass
+            w3_vol_pass ? 76.5 : 68.0, 2.1, {0, 3, 4, 7, 8}, df.back().close * 1.25, df.back().close * 0.9, patterns, dup1, w3_vol_pass
         });
 
         scenarios.push_back({
             2, "結果二：高盈虧比型 (Wave 3 1.618 延伸 + 平行通道)",
-            58.0, 3.4, {0, 1, 4, 7, 8}, 182.00, 138.00, patterns, dup2, false
+            58.0, 3.4, {0, 1, 4, 7, 8}, df.back().close * 1.35, df.back().close * 0.88, patterns, dup2, false
         });
 
         scenarios.push_back({
             3, "結果三：穩健大局型 (寬鬆大局浪 + 支撐通道)",
-            52.3, 1.8, {1, 3, 4, 7, 8}, 160.00, 140.00, patterns, dup2, false
+            52.3, 1.8, {1, 3, 4, 7, 8}, df.back().close * 1.15, df.back().close * 0.92, patterns, dup2, false
         });
 
         std::sort(scenarios.begin(), scenarios.end(), [](const WaveScenario& a, const WaveScenario& b) {
@@ -139,9 +138,10 @@ public:
 };
 
 int main(int argc, char* argv[]) {
-    std::string filename = (argc > 1) ? argv[1] : "input_candles.csv";
+    std::string ticker = (argc > 1) ? argv[1] : "0700.HK";
+    std::string filename = (argc > 2) ? argv[2] : "input_candles.csv";
+    
     std::vector<Candle> mock_data;
-
     std::ifstream in(filename);
     if (in.is_open()) {
         std::string date;
@@ -154,31 +154,33 @@ int main(int argc, char* argv[]) {
 
     if (mock_data.empty()) {
         mock_data = {
-            {"2026-08-01", 100, 102, 98,  100, 1200000}, 
-            {"2026-08-02", 130, 140, 128, 135, 2500000},
-            {"2026-08-03", 135, 135, 115, 118, 1800000}, 
-            {"2026-08-04", 118, 160, 118, 155, 3100000},
-            {"2026-08-05", 155, 155, 116, 120, 1500000}, 
-            {"2026-08-06", 120, 138, 118, 132, 2100000}, 
-            {"2026-08-07", 132, 148, 131, 145, 2800000}, 
-            {"2026-08-08", 145, 146, 143, 144, 4500000},
-            {"2026-08-09", 144, 160, 142, 158, 2200000}, 
-            {"2026-08-10", 158, 195, 158, 190, 5200000}
+            {"2026-08-01", 300, 310, 298, 305, 12000000}, 
+            {"2026-08-02", 305, 320, 300, 315, 15000000},
+            {"2026-08-03", 315, 318, 302, 308, 11000000}, 
+            {"2026-08-04", 308, 335, 308, 330, 22000000},
+            {"2026-08-05", 330, 332, 315, 320, 13000000}, 
+            {"2026-08-06", 320, 330, 318, 328, 16000000}, 
+            {"2026-08-07", 328, 345, 325, 340, 20000000}, 
+            {"2026-08-08", 340, 342, 335, 338, 30000000},
+            {"2026-08-09", 338, 360, 336, 355, 18000000}, 
+            {"2026-08-10", 355, 390, 352, 385, 45000000}
         };
     }
 
     MultiPatternEngine engine(mock_data);
     auto top3 = engine.getTop3Scenarios();
 
+    double latest_close = mock_data.back().close;
+    double latest_vol = mock_data.back().volume;
+    double latest_turnover = latest_close * latest_vol; // 計算成交金額
+
     std::ofstream out("result_top3.json");
-    out << "{\n  \"candles\": [\n";
-    for (size_t i = 0; i < mock_data.size(); ++i) {
-        out << "    {\"date\": \"" << mock_data[i].date << "\", \"open\": " << mock_data[i].open 
-            << ", \"high\": " << mock_data[i].high << ", \"low\": " << mock_data[i].low 
-            << ", \"close\": " << mock_data[i].close << ", \"volume\": " << mock_data[i].volume << "}"
-            << (i + 1 < mock_data.size() ? "," : "") << "\n";
-    }
-    out << "  ],\n  \"scenarios\": [\n";
+    out << "{\n";
+    out << "  \"ticker\": \"" << ticker << "\",\n";
+    out << "  \"latest_close\": " << latest_close << ",\n";
+    out << "  \"latest_volume\": " << latest_vol << ",\n";
+    out << "  \"latest_turnover\": " << latest_turnover << ",\n";
+    out << "  \"scenarios\": [\n";
     for (size_t i = 0; i < top3.size(); ++i) {
         out << "    {\n";
         out << "      \"rank\": " << top3[i].rank << ",\n";
@@ -188,13 +190,6 @@ int main(int argc, char* argv[]) {
         out << "      \"target_w5\": " << top3[i].target_price_w5 << ",\n";
         out << "      \"stop_loss\": " << top3[i].stop_loss << ",\n";
         out << "      \"w3_vol_pass\": " << (top3[i].wave3_vol_confirmed ? "true" : "false") << ",\n";
-        out << "      \"points\": [";
-        for (size_t j = 0; j < top3[i].points.size(); ++j) {
-            out << top3[i].points[j] << (j + 1 < top3[i].points.size() ? ", " : "");
-        }
-        out << "],\n";
-        out << "      \"dup_active\": " << (top3[i].dup_channel.is_active ? "true" : "false") << ",\n";
-        out << "      \"dup_direction\": \"" << top3[i].dup_channel.direction << "\",\n";
         out << "      \"signals\": [\n";
         for (size_t k = 0; k < top3[i].signals.size(); ++k) {
             out << "        {\"index\": " << top3[i].signals[k].index << ", \"type\": \"" << top3[i].signals[k].type << "\"}" 
@@ -206,6 +201,5 @@ int main(int argc, char* argv[]) {
     out << "  ]\n}\n";
     out.close();
 
-    std::cout << "✅ [C++ Engine] 爆算完成！" << std::endl;
     return 0;
 }
