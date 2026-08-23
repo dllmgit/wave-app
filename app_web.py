@@ -64,7 +64,6 @@ HK_POOL = [
     ]
 ]
 
-# 頂行要顯示的所有形態與指標
 PATTERN_COLUMNS = [
     {"key": "triangle", "name": "三角形形態"},
     {"key": "head_shoulders", "name": "頭肩頂/底"},
@@ -75,8 +74,19 @@ PATTERN_COLUMNS = [
 ]
 
 
+def format_tv_symbol(ticker):
+    """將 0700.HK / 0700 轉為 TradingView 相容的代號 HKEX:700"""
+    clean_code = ticker.split(".")[0].replace("HKEX:", "").strip()
+    try:
+        clean_num = str(int(clean_code))  # 去除前導零 (0700 -> 700)
+        return f"HKEX:{clean_num}"
+    except ValueError:
+        return ticker
+
+
 def fetch_stock_quote(ticker):
     """擷取行情以計算成交量/額進行去重排序"""
+    tv_symbol = format_tv_symbol(ticker)
     try:
         url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?interval=1d&range=1d"
         req = urllib.request.Request(
@@ -91,7 +101,7 @@ def fetch_stock_quote(ticker):
             return {
                 "ticker": ticker,
                 "name": ticker,
-                "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
+                "tv_symbol": tv_symbol,
                 "latest_close": close,
                 "latest_turnover": close * volume,
                 "latest_volume": volume,
@@ -100,7 +110,7 @@ def fetch_stock_quote(ticker):
         return {
             "ticker": ticker,
             "name": ticker,
-            "tv_symbol": f"HKEX:{ticker.split('.')[0]}",
+            "tv_symbol": tv_symbol,
             "latest_close": 0.0,
             "latest_turnover": 0,
             "latest_volume": 0,
@@ -110,13 +120,12 @@ def fetch_stock_quote(ticker):
 def get_top_50_merged():
     stock_list = [fetch_stock_quote(t) for t in HK_POOL]
 
-    # 保障機制：即使數據抓取失敗，也強制回傳原本的股票池清單
     if not stock_list:
         return [
             {
                 "ticker": t,
                 "name": t,
-                "tv_symbol": f"HKEX:{t.split('.')[0]}",
+                "tv_symbol": format_tv_symbol(t),
                 "latest_close": 0.0,
                 "latest_turnover": 0,
                 "latest_volume": 0,
@@ -141,7 +150,6 @@ def analyze_pattern(stock_info):
     stock_info["win_rate"] = 0.0
 
     try:
-        # 呼叫 C++ 分析引擎
         if os.path.exists("./pattern_engine"):
             subprocess.run(["./pattern_engine", ticker], check=False)
 
@@ -154,7 +162,6 @@ def analyze_pattern(stock_info):
                 signals = top_scenario.get("signals", [])
                 sig_text = " ".join([s.get("type", "") for s in signals])
 
-                # 比對形態
                 if (
                     "Triangle" in sig_text
                     or "narrowing" in sig_text
@@ -179,9 +186,8 @@ def analyze_pattern(stock_info):
                 )
                 stock_info["win_rate"] = top_scenario.get("win_rate", 0.0)
     except Exception as e:
-        print(f"分析 {ticker} 過程發生異常: {e}")
+        print(f"分析 {ticker} 異常: {e}")
 
-    # 無論成功失敗，都保證回傳完整結構，不丟棄股票
     stock_info["matches"] = matches
     stock_info["has_any_match"] = any(matches.values())
     return stock_info
@@ -197,13 +203,9 @@ def index():
             stock_info = fetch_stock_quote(custom_ticker)
             custom_result = analyze_pattern(stock_info)
 
-    # 1. 取得去重股票池
     unique_pool = get_top_50_merged()
-
-    # 2. 進行型態分析 (所有股票一律保留)
     analyzed_stocks = [analyze_pattern(s) for s in unique_pool]
 
-    # 3. 排序：符合任意指標者排最上方，未符合者排下方
     analyzed_stocks.sort(
         key=lambda x: (
             1 if x.get("has_any_match") else 0,
@@ -248,12 +250,10 @@ def index():
         <div class="container">
             <h1>🔍 技術形態與指標檢查矩陣</h1>
 
-            <!-- 圖例說明 -->
             <div class="legend-box">
-                <strong>📌 圖例說明：</strong> 方格顯示 <strong>✅</strong> 代表符合該項指標條件；未符合則保持留空。所有股票均已完整列出（符合者優先排於表格上方）。
+                <strong>📌 圖例說明：</strong> 方格顯示 <strong>✅</strong> 代表符合該項指標條件；未符合則保持留空。
             </div>
 
-            <!-- 手動查詢股票 -->
             <div class="search-box">
                 <form method="POST">
                     <label for="ticker"><strong>手動指定股票號碼：</strong></label>
@@ -273,7 +273,6 @@ def index():
             </div>
             {% endif %}
 
-            <!-- 主表格 -->
             <table>
                 <thead>
                     <tr>
