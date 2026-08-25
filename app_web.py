@@ -2,7 +2,7 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="HSI Constituents Matrix Engine", version="5.1.0")
+app = FastAPI(title="HSI Constituents Matrix Engine", version="5.2.0")
 
 # 恒生指數成份股（藍籌股）清單
 HSI_CONSTITUENTS = [
@@ -71,7 +71,6 @@ def get_matrix_view():
     rows_html = ""
     for rank, item in enumerate(HSI_CONSTITUENTS, 1):
         tv_link = generate_tv_url(item["symbol"])
-        custom_chart_link = f"/custom-chart?symbol={item['symbol']}"
         
         match_icon = f'<span style="color: #089981; font-weight: bold; font-size: 16px;">✅ {item["pattern"]}</span>' if item["matched"] else '<span style="color: #5d606b;">❌ 未符合</span>'
         
@@ -84,10 +83,7 @@ def get_matrix_view():
             <td>{item['volume']}</td>
             <td>{match_icon}</td>
             <td>
-                <a href="{custom_chart_link}" target="_blank" class="btn btn-custom">🎨 自訂幾何圖表</a>
-            </td>
-            <td>
-                <a href="{tv_link}" target="_blank" class="btn btn-tv">📈 TradingView ↗</a>
+                <a href="{tv_link}" target="_blank" class="btn btn-tv">📈 TradingView 幾何分析 ↗</a>
             </td>
         </tr>
         """
@@ -107,8 +103,6 @@ def get_matrix_view():
             th {{ background: #2a2e39; color: #787b86; text-transform: uppercase; font-size: 12px; }}
             tr:hover {{ background: #262b3e; }}
             .btn {{ padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: bold; display: inline-block; }}
-            .btn-custom {{ background: #9c27b0; color: white; }}
-            .btn-custom:hover {{ background: #ab47bc; }}
             .btn-tv {{ background: #2962ff; color: white; }}
             .btn-tv:hover {{ background: #1e53e5; }}
         </style>
@@ -126,8 +120,7 @@ def get_matrix_view():
                     <th>成交額</th>
                     <th>成交量</th>
                     <th>符合型態要求</th>
-                    <th>自訂繪圖（根據你的邏輯）</th>
-                    <th>TradingView 官方跳轉</th>
+                    <th>幾何圖表操作</th>
                 </tr>
             </thead>
             <tbody>
@@ -139,62 +132,11 @@ def get_matrix_view():
     """
     return html_content
 
-@app.get("/custom-chart", response_class=HTMLResponse)
+@app.get("/custom-chart")
 def get_custom_chart(symbol: str = "HKEX:0700"):
+    # 避免 Widget 港股數據限制，直接重定向至 TradingView 全功能原生圖表
     tv_url = generate_tv_url(symbol)
-
-    # 處理 TradingView Widget 的代碼格式（將 HKEX:0700 轉為 HKEX:700）
-    widget_symbol = symbol
-    if symbol.startswith("HKEX:"):
-        code = symbol.replace("HKEX:", "").lstrip("0")
-        widget_symbol = f"HKEX:{code}"
-
-    html = f"""
-    <!DOCTYPE html>
-    <html lang="zh-HK">
-    <head>
-        <meta charset="UTF-8">
-        <title>自訂邏輯圖表 - {symbol}</title>
-        <style>
-            body {{ font-family: Arial, sans-serif; background: #131722; color: #d1d4dc; padding: 16px; margin: 0; }}
-            .header {{ display: flex; justify-content: space-between; align-items: center; padding: 0 0 12px 0; }}
-            .chart-container {{ width: 100%; height: 80vh; }}
-            .btn-tv {{ background: #2962ff; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-weight: bold; }}
-        </style>
-    </head>
-    <body>
-        <div class="header">
-            <h2 style="margin: 0;">{symbol} - 依據自訂幾何邏輯圖表</h2>
-            <a href="{tv_url}" target="_blank" class="btn-tv">切換至 TradingView 原生頁面 ↗</a>
-        </div>
-        
-        <!-- TradingView 官方 Widget 嵌入區塊 -->
-        <div class="chart-container">
-            <div class="tradingview-widget-container" style="height:100%;width:100%">
-                <div id="tradingview_widget" style="height:100%;width:100%"></div>
-                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
-                <script type="text/javascript">
-                new TradingView.widget({{
-                    "autosize": true,
-                    "symbol": "{widget_symbol}",
-                    "interval": "D",
-                    "timezone": "Asia/Hong_Kong",
-                    "theme": "dark",
-                    "style": "1",
-                    "locale": "zh_TW",
-                    "toolbar_bg": "#f1f3f6",
-                    "enable_publishing": false,
-                    "allow_symbol_change": true,
-                    "container_id": "tradingview_widget"
-                }});
-                </script>
-            </div>
-        </div>
-    </body>
-    </html>
-    """
-    return html
-
+    return RedirectResponse(url=tv_url)
 
 if __name__ == "__main__":
     import uvicorn
