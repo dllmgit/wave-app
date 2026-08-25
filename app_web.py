@@ -140,8 +140,14 @@ def get_matrix_view():
     return html_content
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:2318"):
+def get_custom_chart(symbol: str = "HKEX:0700"):
     tv_url = generate_tv_url(symbol)
+
+    # 處理 TradingView Widget 的代碼格式（將 HKEX:0700 轉為 HKEX:700）
+    widget_symbol = symbol
+    if symbol.startswith("HKEX:"):
+        code = symbol.replace("HKEX:", "").lstrip("0")
+        widget_symbol = f"HKEX:{code}"
 
     html = f"""
     <!DOCTYPE html>
@@ -170,7 +176,7 @@ def get_custom_chart(symbol: str = "HKEX:2318"):
                 <script type="text/javascript">
                 new TradingView.widget({{
                     "autosize": true,
-                    "symbol": "{symbol}",
+                    "symbol": "{widget_symbol}",
                     "interval": "D",
                     "timezone": "Asia/Hong_Kong",
                     "theme": "dark",
@@ -188,6 +194,7 @@ def get_custom_chart(symbol: str = "HKEX:2318"):
     </html>
     """
     return html
+
 
 if __name__ == "__main__":
     import uvicorn
