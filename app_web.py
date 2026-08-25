@@ -2,65 +2,16 @@ import os
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="HSI Constituents Matrix Engine", version="5.2.0")
+app = FastAPI(title="HSI Custom Geometry Engine", version="6.0.0")
 
-# 恒生指數成份股（藍籌股）清單
 HSI_CONSTITUENTS = [
     {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "85.2 億", "volume": "2,350 萬", "matched": True, "pattern": "紅線通道底 + 早晨之星"},
     {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "62.1 億", "volume": "7,800 萬", "matched": True, "pattern": "頭肩底 (5點時間軸驗證)"},
     {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "45.8 億", "volume": "4,120 萬", "matched": True, "pattern": "馬頭雙底突破"},
-    {"symbol": "HKEX:0005", "name": "匯豐控股", "turnover": "38.4 億", "volume": "5,600 萬", "matched": False, "pattern": "-"},
     {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "31.2 億", "volume": "9,200 萬", "matched": True, "pattern": "三角狹窄收斂突破"},
-    {"symbol": "HKEX:1211", "name": "比亞迪股份", "turnover": "28.9 億", "volume": "1,250 萬", "matched": False, "pattern": "-"},
     {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "25.6 億", "volume": "6,300 萬", "matched": True, "pattern": "修復版頭肩底"},
-    {"symbol": "HKEX:0941", "name": "中國移動", "turnover": "22.1 億", "volume": "3,100 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:2269", "name": "藥明生物", "turnover": "19.5 億", "volume": "8,900 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "Hammer 1:3 影線比確認"},
-    {"symbol": "HKEX:9888", "name": "百度集團-SW", "turnover": "17.8 億", "volume": "1,850 萬", "matched": True, "pattern": "幾何通道共振"},
-    {"symbol": "HKEX:9618", "name": "京東集團-SW", "turnover": "16.5 億", "volume": "1,620 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:2015", "name": "理想汽車-W", "turnover": "15.9 億", "volume": "2,100 萬", "matched": True, "pattern": "紅線通道底"},
-    {"symbol": "HKEX:9866", "name": "蔚來-SW", "turnover": "14.2 億", "volume": "3,400 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:9868", "name": "小鵬汽車-W", "turnover": "13.8 億", "volume": "3,900 萬", "matched": True, "pattern": "馬頭雙底突破"},
-    {"symbol": "HKEX:0883", "name": "中國海洋石油", "turnover": "13.1 億", "volume": "6,800 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0388", "name": "香港交易所", "turnover": "12.7 億", "volume": "5,200 萬", "matched": True, "pattern": "頭肩底結構"},
-    {"symbol": "HKEX:1398", "name": "工商銀行", "turnover": "12.0 億", "volume": "2.8 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0939", "name": "建設銀行", "turnover": "11.5 億", "volume": "2.2 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:3988", "name": "中國銀行", "turnover": "11.1 億", "volume": "3.1 億", "matched": True, "pattern": "窄幅三角收斂"},
-    {"symbol": "HKEX:2382", "name": "舜宇光學科技", "turnover": "10.8 億", "volume": "1,950 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:2020", "name": "安踏體育", "turnover": "10.4 億", "volume": "1,320 萬", "matched": True, "pattern": "幾何通道共振"},
-    {"symbol": "HKEX:2331", "name": "李寧", "turnover": "9.9 億", "volume": "4,800 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:1109", "name": "華潤置地", "turnover": "9.5 億", "volume": "3,600 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0688", "name": "中國海外發展", "turnover": "9.1 億", "volume": "5,100 萬", "matched": True, "pattern": "紅線通道底"},
-    {"symbol": "HKEX:1093", "name": "石藥集團", "turnover": "8.8 億", "volume": "1.1 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:1177", "name": "中國生物製藥", "turnover": "8.5 億", "volume": "1.8 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:2268", "name": "藥明康德", "turnover": "8.2 億", "volume": "1,450 萬", "matched": True, "pattern": "Hammer 影線比確認"},
-    {"symbol": "HKEX:6618", "name": "京東健康", "turnover": "7.9 億", "volume": "2,200 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0241", "name": "阿里健康", "turnover": "7.6 億", "volume": "1.5 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:1929", "name": "周大福", "turnover": "7.3 億", "volume": "6,100 萬", "matched": True, "pattern": "馬頭雙底突破"},
-    {"symbol": "HKEX:0267", "name": "中信股份", "turnover": "7.1 億", "volume": "7,300 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0288", "name": "萬洲國際", "turnover": "6.8 億", "volume": "9,800 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0016", "name": "新鴻基地產", "turnover": "6.6 億", "volume": "8,400 萬", "matched": True, "pattern": "頭肩底結構"},
-    {"symbol": "HKEX:0001", "name": "長和", "turnover": "6.3 億", "volume": "1,350 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0003", "name": "香港中華煤氣", "turnover": "6.1 億", "volume": "9,200 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0006", "name": "電能實業", "turnover": "5.9 億", "volume": "1,100 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0011", "name": "恒生銀行", "turnover": "5.7 億", "volume": "5,300 萬", "matched": True, "pattern": "窄幅三角收斂"},
-    {"symbol": "HKEX:0027", "name": "銀河娛樂", "turnover": "5.5 億", "volume": "1,600 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:1928", "name": "金沙中國有限公司", "turnover": "5.3 億", "volume": "2,700 萬", "matched": True, "pattern": "幾何通道共振"},
-    {"symbol": "HKEX:0669", "name": "創科實業", "turnover": "5.1 億", "volume": "5,800 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0291", "name": "華潤啤酒", "turnover": "4.9 億", "volume": "1,750 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0151", "name": "中國旺旺", "turnover": "4.7 億", "volume": "8,900 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:0322", "name": "康師傅控股", "turnover": "4.5 億", "volume": "4,100 萬", "matched": True, "pattern": "紅線通道底"},
-    {"symbol": "HKEX:0968", "name": "信義光能", "turnover": "4.3 億", "volume": "1.2 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:3800", "name": "協鑫科技", "turnover": "4.1 億", "volume": "3.5 億", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:1772", "name": "贛鋒鋰業", "turnover": "3.9 億", "volume": "1,800 萬", "matched": True, "pattern": "馬頭雙底突破"},
-    {"symbol": "HKEX:3968", "name": "招商銀行", "turnover": "3.8 億", "volume": "1,150 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:2601", "name": "中國太保", "turnover": "3.6 億", "volume": "1,400 萬", "matched": False, "pattern": "-"},
-    {"symbol": "HKEX:2628", "name": "中國人壽", "turnover": "3.5 億", "volume": "2,500 萬", "matched": True, "pattern": "頭肩底 (5點驗證)"}
+    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "Hammer 1:3 影線比確認"}
 ]
-
-def generate_tv_url(symbol: str, interval: str = "D") -> str:
-    formatted_symbol = symbol.replace(":", "%3A")
-    return f"https://www.tradingview.com/chart/?symbol={formatted_symbol}&interval={interval}"
 
 @app.get("/")
 def read_root():
@@ -70,10 +21,7 @@ def read_root():
 def get_matrix_view():
     rows_html = ""
     for rank, item in enumerate(HSI_CONSTITUENTS, 1):
-        tv_link = generate_tv_url(item["symbol"])
-        
-        match_icon = f'<span style="color: #089981; font-weight: bold; font-size: 16px;">✅ {item["pattern"]}</span>' if item["matched"] else '<span style="color: #5d606b;">❌ 未符合</span>'
-        
+        custom_chart_link = f"/custom-chart?symbol={item['symbol']}&pattern={item['pattern']}"
         rows_html += f"""
         <tr>
             <td style="color: #787b86;">{rank}</td>
@@ -81,62 +29,144 @@ def get_matrix_view():
             <td style="font-weight: bold; color: #ffffff;">{item['name']}</td>
             <td>{item['turnover']}</td>
             <td>{item['volume']}</td>
-            <td>{match_icon}</td>
+            <td><span style="color: #089981; font-weight: bold;">✅ {item['pattern']}</span></td>
             <td>
-                <a href="{tv_link}" target="_blank" class="btn btn-tv">📈 TradingView 幾何分析 ↗</a>
+                <a href="{custom_chart_link}" class="btn btn-custom">🎨 執行自訂幾何繪圖</a>
             </td>
         </tr>
         """
 
-    html_content = f"""
+    return f"""
     <!DOCTYPE html>
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>恒指成份股 - 幾何形態檢查矩陣</title>
+        <title>幾何形態矩陣</title>
         <style>
-            body {{ font-family: -apple-system, BlinkMacSystemFont, Arial, sans-serif; background: #131722; color: #d1d4dc; padding: 20px; }}
-            .header-bar {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }}
-            h2 {{ color: #ffffff; margin: 0; }}
-            table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; overflow: hidden; }}
-            th, td {{ padding: 12px 16px; text-align: left; border-bottom: 1px solid #2a2e39; font-size: 14px; }}
-            th {{ background: #2a2e39; color: #787b86; text-transform: uppercase; font-size: 12px; }}
-            tr:hover {{ background: #262b3e; }}
-            .btn {{ padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: bold; display: inline-block; }}
-            .btn-tv {{ background: #2962ff; color: white; }}
-            .btn-tv:hover {{ background: #1e53e5; }}
+            body {{ font-family: sans-serif; background: #131722; color: #d1d4dc; padding: 20px; }}
+            table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; }}
+            th, td {{ padding: 12px 16px; border-bottom: 1px solid #2a2e39; }}
+            th {{ background: #2a2e39; color: #787b86; }}
+            .btn-custom {{ background: #9c27b0; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-weight: bold; }}
         </style>
     </head>
     <body>
-        <div class="header-bar">
-            <h2>恒生指數成份股 - 幾何形態即時監控</h2>
-        </div>
+        <h2>恒生指數成份股 - 自訂幾何邏輯監控</h2>
         <table>
             <thead>
-                <tr>
-                    <th>序號</th>
-                    <th>代碼</th>
-                    <th>股票名稱</th>
-                    <th>成交額</th>
-                    <th>成交量</th>
-                    <th>符合型態要求</th>
-                    <th>幾何圖表操作</th>
-                </tr>
+                <tr><th>序號</th><th>代碼</th><th>股票名稱</th><th>成交額</th><th>成交量</th><th>符合型態</th><th>操作</th></tr>
             </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
+            <tbody>{rows_html}</tbody>
         </table>
     </body>
     </html>
     """
-    return html_content
 
-@app.get("/custom-chart")
-def get_custom_chart(symbol: str = "HKEX:0700"):
-    # 避免 Widget 港股數據限制，直接重定向至 TradingView 全功能原生圖表
-    tv_url = generate_tv_url(symbol)
-    return RedirectResponse(url=tv_url)
+@app.get("/custom-chart", response_class=HTMLResponse)
+def get_custom_chart(symbol: str = "HKEX:2318", pattern: str = "自訂幾何邏輯"):
+    return f"""
+    <!DOCTYPE html>
+    <html lang="zh-HK">
+    <head>
+        <meta charset="UTF-8">
+        <title>自訂幾何繪圖 - {symbol}</title>
+        <style>
+            body {{ font-family: sans-serif; background: #131722; color: #ffffff; padding: 20px; margin: 0; }}
+            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }}
+            #chartCanvas {{ background: #1e222d; border-radius: 8px; border: 1px solid #2a2e39; width: 100%; height: 500px; }}
+            .badge {{ background: #2962ff; padding: 4px 10px; border-radius: 4px; font-size: 14px; }}
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h2>{symbol} - 自訂幾何圖表渲染器</h2>
+            <span class="badge">套用邏輯：{pattern}</span>
+        </div>
+
+        <canvas id="chartCanvas" width="1000" height="500"></canvas>
+
+        <script>
+            const canvas = document.getElementById('chartCanvas');
+            const ctx = canvas.getContext('2d');
+
+            // 模擬 K 線數據 (Open, High, Low, Close)
+            const candles = [
+                {{o: 100, h: 105, l: 98, c: 103}},
+                {{o: 103, h: 108, l: 101, c: 102}},
+                {{o: 102, h: 104, l: 95, c: 96}},
+                {{o: 96, h: 99, l: 92, c: 94}},
+                {{o: 94, h: 101, l: 93, c: 100}},
+                {{o: 100, h: 107, l: 99, c: 106}},
+                {{o: 106, h: 112, l: 105, c: 110}},
+                {{o: 110, h: 115, l: 108, c: 114}},
+                {{o: 114, h: 118, l: 112, c: 113}},
+                {{o: 113, h: 122, l: 113, c: 120}},
+            ];
+
+            const padding = 50;
+            const chartWidth = canvas.width - padding * 2;
+            const chartHeight = canvas.height - padding * 2;
+            const candleWidth = chartWidth / candles.length;
+
+            // 1. 繪製背景網格
+            ctx.strokeStyle = '#2a2e39';
+            ctx.lineWidth = 1;
+            for(let i = 0; i <= 5; i++) {{
+                let y = padding + (chartHeight / 5) * i;
+                ctx.beginPath();
+                ctx.moveTo(padding, y);
+                ctx.lineTo(canvas.width - padding, y);
+                ctx.stroke();
+            }}
+
+            // 2. 繪製 K 線
+            candles.forEach((c, idx) => {{
+                let x = padding + idx * candleWidth + candleWidth / 2;
+                let isGreen = c.c >= c.o;
+                
+                // 價格映身至 Canvas 座標
+                let yHigh = padding + chartHeight - ((c.h - 90) / 35) * chartHeight;
+                let yLow = padding + chartHeight - ((c.l - 90) / 35) * chartHeight;
+                let yOpen = padding + chartHeight - ((c.o - 90) / 35) * chartHeight;
+                let yClose = padding + chartHeight - ((c.c - 90) / 35) * chartHeight;
+
+                // 畫影線
+                ctx.strokeStyle = isGreen ? '#089981' : '#f23645';
+                ctx.beginPath();
+                ctx.moveTo(x, yHigh);
+                ctx.lineTo(x, yLow);
+                ctx.stroke();
+
+                // 畫實體
+                ctx.fillStyle = isGreen ? '#089981' : '#f23645';
+                ctx.fillRect(x - 12, Math.min(yOpen, yClose), 24, Math.abs(yClose - yOpen) || 2);
+            }});
+
+            // 3. 執行自訂幾何圖形邏輯繪製（範例：自動繪製通道線與突破點）
+            // 上軌趨勢線 (紅線)
+            ctx.strokeStyle = '#f23645';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(padding + 20, 200);
+            ctx.lineTo(canvas.width - padding - 20, 80);
+            ctx.stroke();
+
+            // 下軌支撐線 (綠線)
+            ctx.strokeStyle = '#089981';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(padding + 20, 420);
+            ctx.lineTo(canvas.width - padding - 20, 260);
+            ctx.stroke();
+
+            // 自訂標示：幾何訊號觸發點
+            ctx.fillStyle = '#ffeb3b';
+            ctx.font = 'bold 14px Arial';
+            ctx.fillText('★ 幾何形態突破點', canvas.width - 220, 70);
+        </script>
+    </body>
+    </html>
+    """
 
 if __name__ == "__main__":
     import uvicorn
