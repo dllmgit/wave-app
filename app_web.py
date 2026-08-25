@@ -1,17 +1,51 @@
 import os
+import datetime
+import numpy as np
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="HSI Custom Geometry Engine", version="6.0.0")
+app = FastAPI(title="HSI Custom Geometry Engine", version="7.0.0")
 
 HSI_CONSTITUENTS = [
-    {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "85.2 億", "volume": "2,350 萬", "matched": True, "pattern": "紅線通道底 + 早晨之星"},
-    {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "62.1 億", "volume": "7,800 萬", "matched": True, "pattern": "頭肩底 (5點時間軸驗證)"},
-    {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "45.8 億", "volume": "4,120 萬", "matched": True, "pattern": "馬頭雙底突破"},
-    {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "31.2 億", "volume": "9,200 萬", "matched": True, "pattern": "三角狹窄收斂突破"},
-    {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "25.6 億", "volume": "6,300 萬", "matched": True, "pattern": "修復版頭肩底"},
-    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "Hammer 1:3 影線比確認"}
+    {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "85.2 億", "volume": "2,350 萬", "matched": True, "pattern": "紅線通道底 + 早晨之星", "start_year": 2004},
+    {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "62.1 億", "volume": "7,800 萬", "matched": True, "pattern": "頭肩底 (5點時間軸驗證)", "start_year": 2019},
+    {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "45.8 億", "volume": "4,120 萬", "matched": True, "pattern": "馬頭雙底突破", "start_year": 2018},
+    {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "31.2 億", "volume": "9,200 萬", "matched": True, "pattern": "三角狹窄收斂突破", "start_year": 2018},
+    {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "25.6 億", "volume": "6,300 萬", "matched": True, "pattern": "修復版頭肩底", "start_year": 2004},
+    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "Hammer 1:3 影線比確認", "start_year": 2021}
 ]
+
+def generate_full_history_candles(start_year: int):
+    """模擬產生自上市年份至今的所有每日陰陽燭數據"""
+    start_date = datetime.date(start_year, 1, 1)
+    end_date = datetime.date.today()
+    
+    dates = []
+    data = [] # [Open, Close, Low, High]
+    
+    curr = start_date
+    price = 100.0
+    
+    # 使用隨機走勢模擬歷史 K 線
+    np.random.seed(42 + start_year)
+    
+    while curr <= end_date:
+        if curr.weekday() < 5: # 僅交易日
+            date_str = curr.strftime("%Y-%m-%d")
+            dates.append(date_str)
+            
+            change = np.random.normal(0.05, 1.8)
+            open_p = round(price, 2)
+            close_p = round(max(5.0, price + change), 2)
+            high_p = round(max(open_p, close_p) + abs(np.random.normal(0, 0.8)), 2)
+            low_p = round(max(1.0, min(open_p, close_p) - abs(np.random.normal(0, 0.8))), 2)
+            
+            data.append([open_p, close_p, low_p, high_p])
+            price = close_p
+            
+        curr += datetime.timedelta(days=1)
+        
+    return dates, data
 
 @app.get("/")
 def read_root():
@@ -21,17 +55,17 @@ def read_root():
 def get_matrix_view():
     rows_html = ""
     for rank, item in enumerate(HSI_CONSTITUENTS, 1):
-        custom_chart_link = f"/custom-chart?symbol={item['symbol']}&pattern={item['pattern']}"
+        custom_chart_link = f"/custom-chart?symbol={item['symbol']}&pattern={item['pattern']}&start_year={item['start_year']}"
         rows_html += f"""
         <tr>
             <td style="color: #787b86;">{rank}</td>
             <td style="font-weight: bold; color: #2962ff;">{item['symbol']}</td>
             <td style="font-weight: bold; color: #ffffff;">{item['name']}</td>
+            <td>上市年份 ({item['start_year']})</td>
             <td>{item['turnover']}</td>
-            <td>{item['volume']}</td>
             <td><span style="color: #089981; font-weight: bold;">✅ {item['pattern']}</span></td>
             <td>
-                <a href="{custom_chart_link}" class="btn btn-custom">🎨 執行自訂幾何繪圖</a>
+                <a href="{custom_chart_link}" class="btn btn-custom">🎨 全歷史幾何圖表</a>
             </td>
         </tr>
         """
@@ -41,7 +75,7 @@ def get_matrix_view():
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>幾何形態矩陣</title>
+        <title>全歷史幾何圖表矩陣</title>
         <style>
             body {{ font-family: sans-serif; background: #131722; color: #d1d4dc; padding: 20px; }}
             table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; }}
@@ -51,10 +85,10 @@ def get_matrix_view():
         </style>
     </head>
     <body>
-        <h2>恒生指數成份股 - 自訂幾何邏輯監控</h2>
+        <h2>恒生指數成份股 - 上市至今自訂幾何圖表</h2>
         <table>
             <thead>
-                <tr><th>序號</th><th>代碼</th><th>股票名稱</th><th>成交額</th><th>成交量</th><th>符合型態</th><th>操作</th></tr>
+                <tr><th>序號</th><th>代碼</th><th>股票名稱</th><th>上市歷史</th><th>成交額</th><th>符合型態</th><th>操作</th></tr>
             </thead>
             <tbody>{rows_html}</tbody>
         </table>
@@ -63,106 +97,114 @@ def get_matrix_view():
     """
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:2318", pattern: str = "自訂幾何邏輯"):
+def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分析", start_year: int = 2004):
+    dates, candles = generate_full_history_candles(start_year)
+
     return f"""
     <!DOCTYPE html>
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>自訂幾何繪圖 - {symbol}</title>
+        <title>{symbol} - 全歷史陰陽燭幾何繪圖</title>
+        <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <style>
             body {{ font-family: sans-serif; background: #131722; color: #ffffff; padding: 20px; margin: 0; }}
             .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }}
-            #chartCanvas {{ background: #1e222d; border-radius: 8px; border: 1px solid #2a2e39; width: 100%; height: 500px; }}
-            .badge {{ background: #2962ff; padding: 4px 10px; border-radius: 4px; font-size: 14px; }}
+            #chartContainer {{ width: 100%; height: 650px; background: #1e222d; border-radius: 8px; border: 1px solid #2a2e39; }}
+            .badge {{ background: #2962ff; padding: 6px 12px; border-radius: 4px; font-size: 14px; }}
+            .tip {{ color: #787b86; font-size: 12px; margin-top: 8px; }}
         </style>
     </head>
     <body>
         <div class="header">
-            <h2>{symbol} - 自訂幾何圖表渲染器</h2>
-            <span class="badge">套用邏輯：{pattern}</span>
+            <h2>{symbol} - 上市至今 ({start_year} 年至今) 陰陽蠋繪圖</h2>
+            <span class="badge">套用幾何邏輯：{pattern}</span>
         </div>
 
-        <canvas id="chartCanvas" width="1000" height="500"></canvas>
+        <div id="chartContainer"></div>
+        <div class="tip">💡 操作提示：使用滾輪或下方滑塊可隨意【縮放】與【拖拽】時間軸，瀏覽上市至今的所有陰陽燭。</div>
 
         <script>
-            const canvas = document.getElementById('chartCanvas');
-            const ctx = canvas.getContext('2d');
+            const chartDom = document.getElementById('chartContainer');
+            const myChart = echarts.init(chartDom, 'dark');
 
-            // 模擬 K 線數據 (Open, High, Low, Close)
-            const candles = [
-                {{o: 100, h: 105, l: 98, c: 103}},
-                {{o: 103, h: 108, l: 101, c: 102}},
-                {{o: 102, h: 104, l: 95, c: 96}},
-                {{o: 96, h: 99, l: 92, c: 94}},
-                {{o: 94, h: 101, l: 93, c: 100}},
-                {{o: 100, h: 107, l: 99, c: 106}},
-                {{o: 106, h: 112, l: 105, c: 110}},
-                {{o: 110, h: 115, l: 108, c: 114}},
-                {{o: 114, h: 118, l: 112, c: 113}},
-                {{o: 113, h: 122, l: 113, c: 120}},
-            ];
+            const dates = {dates};
+            const data = {candles}; // [Open, Close, Low, High]
 
-            const padding = 50;
-            const chartWidth = canvas.width - padding * 2;
-            const chartHeight = canvas.height - padding * 2;
-            const candleWidth = chartWidth / candles.length;
+            const option = {{
+                backgroundColor: '#1e222d',
+                title: {{ text: '{symbol} 全歷史 K 線與自訂幾何通道', left: 10, textStyle: {{ color: '#d1d4dc', fontSize: 16 }} }},
+                tooltip: {{
+                    trigger: 'axis',
+                    axisPointer: {{ type: 'cross' }}
+                }},
+                grid: {{ left: '5%', right: '5%', bottom: '15%' }},
+                xAxis: {{
+                    type: 'category',
+                    data: dates,
+                    scale: true,
+                    boundaryGap: false,
+                    axisLine: {{ onZero: false, lineStyle: {{ color: '#2a2e39' }} }},
+                    splitLine: {{ show: false }},
+                    axisLabel: {{ color: '#787b86' }}
+                }},
+                yAxis: {{
+                    scale: true,
+                    splitArea: {{ show: true, areaStyle: {{ color: ['rgba(30,34,45,0.3)', 'rgba(20,24,35,0.3)'] }} }},
+                    splitLine: {{ lineStyle: {{ color: '#2a2e39' }} }},
+                    axisLabel: {{ color: '#787b86' }}
+                }},
+                // 1. 支援滾輪與拖曳縮放（DataZoom）
+                dataZoom: [
+                    {{
+                        type: 'inside', // 滾輪 / 雙指縮放
+                        start: 80,      // 預設顯示最後 20% 的數據
+                        end: 100
+                    }},
+                    {{
+                        show: true,     // 下方時間軸滑塊
+                        type: 'slider',
+                        top: '90%',
+                        start: 80,
+                        end: 100,
+                        textStyle: {{ color: '#d1d4dc' }}
+                    }}
+                ],
+                series: [
+                    // 2. 陰陽燭渲染
+                    {{
+                        name: '日 K 線',
+                        type: 'candlestick',
+                        data: data,
+                        itemStyle: {{
+                            color: '#089981',        // 陽線顏色
+                            color0: '#f23645',       // 陰線顏色
+                            borderColor: '#089981',
+                            borderColor0: '#f23645'
+                        }}
+                    }},
+                    // 3. 疊加自訂幾何線條（例如：自動趨勢通道/支撐線）
+                    {{
+                        name: '自訂幾何趨勢線',
+                        type: 'line',
+                        data: data.map((item, idx) => item[1] * 1.08), // 範例：動態幾何上軌
+                        smooth: true,
+                        showSymbol: false,
+                        lineStyle: {{ color: '#f23645', width: 2, type: 'dashed' }}
+                    }},
+                    {{
+                        name: '自訂幾何支撐線',
+                        type: 'line',
+                        data: data.map((item, idx) => item[1] * 0.92), // 範例：動態幾何下軌
+                        smooth: true,
+                        showSymbol: false,
+                        lineStyle: {{ color: '#089981', width: 2, type: 'dashed' }}
+                    }}
+                ]
+            }};
 
-            // 1. 繪製背景網格
-            ctx.strokeStyle = '#2a2e39';
-            ctx.lineWidth = 1;
-            for(let i = 0; i <= 5; i++) {{
-                let y = padding + (chartHeight / 5) * i;
-                ctx.beginPath();
-                ctx.moveTo(padding, y);
-                ctx.lineTo(canvas.width - padding, y);
-                ctx.stroke();
-            }}
-
-            // 2. 繪製 K 線
-            candles.forEach((c, idx) => {{
-                let x = padding + idx * candleWidth + candleWidth / 2;
-                let isGreen = c.c >= c.o;
-                
-                // 價格映身至 Canvas 座標
-                let yHigh = padding + chartHeight - ((c.h - 90) / 35) * chartHeight;
-                let yLow = padding + chartHeight - ((c.l - 90) / 35) * chartHeight;
-                let yOpen = padding + chartHeight - ((c.o - 90) / 35) * chartHeight;
-                let yClose = padding + chartHeight - ((c.c - 90) / 35) * chartHeight;
-
-                // 畫影線
-                ctx.strokeStyle = isGreen ? '#089981' : '#f23645';
-                ctx.beginPath();
-                ctx.moveTo(x, yHigh);
-                ctx.lineTo(x, yLow);
-                ctx.stroke();
-
-                // 畫實體
-                ctx.fillStyle = isGreen ? '#089981' : '#f23645';
-                ctx.fillRect(x - 12, Math.min(yOpen, yClose), 24, Math.abs(yClose - yOpen) || 2);
-            }});
-
-            // 3. 執行自訂幾何圖形邏輯繪製（範例：自動繪製通道線與突破點）
-            // 上軌趨勢線 (紅線)
-            ctx.strokeStyle = '#f23645';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(padding + 20, 200);
-            ctx.lineTo(canvas.width - padding - 20, 80);
-            ctx.stroke();
-
-            // 下軌支撐線 (綠線)
-            ctx.strokeStyle = '#089981';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(padding + 20, 420);
-            ctx.lineTo(canvas.width - padding - 20, 260);
-            ctx.stroke();
-
-            // 自訂標示：幾何訊號觸發點
-            ctx.fillStyle = '#ffeb3b';
-            ctx.font = 'bold 14px Arial';
-            ctx.fillText('★ 幾何形態突破點', canvas.width - 220, 70);
+            myChart.setOption(option);
+            window.addEventListener('resize', myChart.resize);
         </script>
     </body>
     </html>
