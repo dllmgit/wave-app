@@ -5,27 +5,22 @@ import json
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="HSI Custom Geometry Engine", version="8.3.0")
+app = FastAPI(title="HSI Custom Geometry Engine", version="9.0.0")
 
 HSI_CONSTITUENTS = [
-    {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "85.2 億", "volume": "2,350 萬", "matched": True, "pattern": "紅線通道底 + 早晨之星", "start_year": 2004},
-    {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "62.1 億", "volume": "7,800 萬", "matched": True, "pattern": "頭肩底 (5點時間軸驗證)", "start_year": 2019},
-    {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "45.8 億", "volume": "4,120 萬", "matched": True, "pattern": "馬頭雙底突破", "start_year": 2018},
-    {"symbol": "HKEX:0005", "name": "匯豐控股", "turnover": "38.4 億", "volume": "5,600 萬", "matched": False, "pattern": "-", "start_year": 2000},
-    {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "31.2 億", "volume": "9,200 萬", "matched": True, "pattern": "三角狹窄收斂突破", "start_year": 2018},
-    {"symbol": "HKEX:1211", "name": "比亞迪股份", "turnover": "28.9 億", "volume": "1,250 萬", "matched": False, "pattern": "-", "start_year": 2002},
-    {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "25.6 億", "volume": "6,300 萬", "matched": True, "pattern": "修復版頭肩底", "start_year": 2004},
-    {"symbol": "HKEX:0941", "name": "中國移動", "turnover": "22.1 億", "volume": "3,100 萬", "matched": False, "pattern": "-", "start_year": 2000},
-    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "Hammer 1:3 影線比確認", "start_year": 2021}
+    {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "85.2 億", "volume": "2,350 萬", "matched": True, "pattern": "早晨之星 + 幾何通道趨勢線", "pattern_type": "channel", "start_year": 2004},
+    {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "62.1 億", "volume": "7,800 萬", "matched": True, "pattern": "標準頭肩底結構", "pattern_type": "head_shoulders_bottom", "start_year": 2019},
+    {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "45.8 億", "volume": "4,120 萬", "matched": True, "pattern": "頭肩頂反轉預警", "pattern_type": "head_shoulders_top", "start_year": 2018},
+    {"symbol": "HKEX:0005", "name": "匯豐控股", "turnover": "38.4 億", "volume": "5,600 萬", "matched": False, "pattern": "-", "pattern_type": "none", "start_year": 2000},
+    {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "31.2 億", "volume": "9,200 萬", "matched": True, "pattern": "三角狹窄收斂趨勢線", "pattern_type": "triangle", "start_year": 2018},
+    {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "25.6 億", "volume": "6,300 萬", "matched": True, "pattern": "修復版頭肩底", "pattern_type": "head_shoulders_bottom", "start_year": 2004},
+    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "頭肩頂形態", "pattern_type": "head_shoulders_top", "start_year": 2021}
 ]
 
 def generate_full_history_candles(start_year: int):
     start_date = datetime.date(start_year, 1, 1)
     end_date = datetime.date.today()
-    
-    dates = []
-    data = []
-    
+    dates, data = [], []
     curr = start_date
     price = 100.0
     random.seed(42 + start_year)
@@ -34,18 +29,14 @@ def generate_full_history_candles(start_year: int):
         if curr.weekday() < 5:
             date_str = curr.strftime("%Y-%m-%d")
             dates.append(date_str)
-            
             change = random.gauss(0.05, 1.8)
             open_p = round(price, 2)
             close_p = round(max(5.0, price + change), 2)
             high_p = round(max(open_p, close_p) + abs(random.gauss(0, 0.8)), 2)
             low_p = round(max(1.0, min(open_p, close_p) - abs(random.gauss(0, 0.8))), 2)
-            
             data.append([open_p, close_p, low_p, high_p])
             price = close_p
-            
         curr += datetime.timedelta(days=1)
-        
     return dates, data
 
 @app.get("/")
@@ -56,7 +47,7 @@ def read_root():
 def get_matrix_view():
     rows_html = ""
     for rank, item in enumerate(HSI_CONSTITUENTS, 1):
-        custom_chart_link = f"/custom-chart?symbol={item['symbol']}&pattern={item['pattern']}&start_year={item['start_year']}"
+        custom_chart_link = f"/custom-chart?symbol={item['symbol']}&pattern={item['pattern']}&pattern_type={item['pattern_type']}&start_year={item['start_year']}"
         match_icon = f'<span style="color: #089981; font-weight: bold;">✅ {item["pattern"]}</span>' if item["matched"] else '<span style="color: #5d606b;">❌ 未符合</span>'
         
         rows_html += f"""
@@ -68,7 +59,7 @@ def get_matrix_view():
             <td>{item['turnover']}</td>
             <td>{match_icon}</td>
             <td>
-                <a href="{custom_chart_link}" class="btn btn-custom">🎨 全歷史幾何繪圖</a>
+                <a href="{custom_chart_link}" class="btn btn-custom">🎨 繪製形態趨勢線</a>
             </td>
         </tr>
         """
@@ -84,11 +75,11 @@ def get_matrix_view():
             table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; }}
             th, td {{ padding: 12px 16px; border-bottom: 1px solid #2a2e39; }}
             th {{ background: #2a2e39; color: #787b86; }}
-            .btn-custom {{ background: #9c27b0; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-weight: bold; }}
+            .btn-custom {{ background: #2962ff; color: white; padding: 6px 12px; border-radius: 4px; text-decoration: none; font-weight: bold; }}
         </style>
     </head>
     <body>
-        <h2>恒生指數成份股 - 上市至今自訂幾何圖表</h2>
+        <h2>恒生指數成份股 - 自動繪製幾何趨勢線與形態</h2>
         <table>
             <thead>
                 <tr><th>序號</th><th>代碼</th><th>股票名稱</th><th>歷史區間</th><th>成交額</th><th>符合型態</th><th>操作</th></tr>
@@ -100,18 +91,77 @@ def get_matrix_view():
     """
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分析", start_year: int = 2004):
+def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分析", pattern_type: str = "channel", start_year: int = 2004):
     dates, candles = generate_full_history_candles(start_year)
-    
-    # 計算軌道線資料，避免在前端 JS 寫箭頭函數導致語法衝突
-    upper_band = [round(item[1] * 1.08, 2) for item in candles]
-    lower_band = [round(item[1] * 0.92, 2) for item in candles]
+    total_len = len(dates)
 
-    # 直接序列化為 JSON 字串
+    # 幾何趨勢線與型態點陣列 (MarkLines / MarkPoints)
+    mark_lines = []
+    mark_points = []
+
+    # 根據不同型態生成精緻幾何圖表
+    if pattern_type == "head_shoulders_bottom" and total_len > 100:
+        # 頭肩底：左肩、頭、右肩、頸線
+        idx_ls, idx_h, idx_rs = total_len - 80, total_len - 50, total_len - 20
+        p_ls, p_h, p_rs = candles[idx_ls][2], candles[idx_h][2], candles[idx_rs][2]
+        p_neck = max(candles[idx_ls][3], candles[idx_rs][3]) * 1.02
+
+        # 1. 畫出頸線 (Neckline)
+        mark_lines.append([
+            {"name": "頸線 (Neckline)", "coord": [dates[idx_ls - 10], p_neck], "lineStyle": {"color": "#ff9800", "width": 3, "type": "solid"}},
+            {"coord": [dates[-1], p_neck]}
+        ])
+        # 2. 標註 左肩、頭、右肩
+        mark_points.extend([
+            {"name": "左肩", "coord": [dates[idx_ls], p_ls], "value": "左肩", "itemStyle": {"color": "#2962ff"}},
+            {"name": "頭部", "coord": [dates[idx_h], p_h], "value": "頭部", "itemStyle": {"color": "#f23645"}},
+            {"name": "右肩", "coord": [dates[idx_rs], p_rs], "value": "右肩", "itemStyle": {"color": "#2962ff"}}
+        ])
+
+    elif pattern_type == "head_shoulders_top" and total_len > 100:
+        # 頭肩頂：左肩、頭、右肩、頸線
+        idx_ls, idx_h, idx_rs = total_len - 80, total_len - 50, total_len - 20
+        p_ls, p_h, p_rs = candles[idx_ls][3], candles[idx_h][3], candles[idx_rs][3]
+        p_neck = min(candles[idx_ls][2], candles[idx_rs][2]) * 0.98
+
+        mark_lines.append([
+            {"name": "頸線 (Neckline)", "coord": [dates[idx_ls - 10], p_neck], "lineStyle": {"color": "#f23645", "width": 3, "type": "solid"}},
+            {"coord": [dates[-1], p_neck]}
+        ])
+        mark_points.extend([
+            {"name": "左肩", "coord": [dates[idx_ls], p_ls], "value": "左肩 (頂)", "itemStyle": {"color": "#ff9800"}},
+            {"name": "頭部", "coord": [dates[idx_h], p_h], "value": "頭部 (頂)", "itemStyle": {"color": "#f23645"}},
+            {"name": "右肩", "coord": [dates[idx_rs], p_rs], "value": "右肩 (頂)", "itemStyle": {"color": "#ff9800"}}
+        ])
+
+    elif pattern_type == "triangle" and total_len > 100:
+        # 三角收斂趨勢線（上降線 + 上升線）
+        idx_start, idx_end = total_len - 120, total_len - 5
+        mark_lines.append([
+            {"name": "下降阻力趨勢線", "coord": [dates[idx_start], candles[idx_start][3] * 1.05], "lineStyle": {"color": "#f23645", "width": 2}},
+            {"coord": [dates[idx_end], candles[idx_end][3] * 1.01]}
+        ])
+        mark_lines.append([
+            {"name": "上升支撐趨勢線", "coord": [dates[idx_start], candles[idx_start][2] * 0.95], "lineStyle": {"color": "#089981", "width": 2}},
+            {"coord": [dates[idx_end], candles[idx_end][2] * 0.99]}
+        ])
+
+    else:
+        # 通道趨勢線 (Channel / Trendline)
+        idx_start = max(0, total_len - 200)
+        mark_lines.append([
+            {"name": "通道頂部阻力線", "coord": [dates[idx_start], candles[idx_start][3] * 1.04], "lineStyle": {"color": "#f23645", "width": 2, "type": "dashed"}},
+            {"coord": [dates[-1], candles[-1][3] * 1.04]}
+        ])
+        mark_lines.append([
+            {"name": "通道底部支撐線", "coord": [dates[idx_start], candles[idx_start][2] * 0.96], "lineStyle": {"color": "#089981", "width": 2, "type": "dashed"}},
+            {"coord": [dates[-1], candles[-1][2] * 0.96]}
+        ])
+
     dates_json = json.dumps(dates)
     candles_json = json.dumps(candles)
-    upper_json = json.dumps(upper_band)
-    lower_json = json.dumps(lower_band)
+    mark_lines_json = json.dumps(mark_lines)
+    mark_points_json = json.dumps(mark_points)
 
     html_content = """
     <!DOCTYPE html>
@@ -130,12 +180,12 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
     </head>
     <body>
         <div class="header">
-            <h2>__SYMBOL__ - 上市至今 (__START_YEAR__ - 至今) 幾何分析圖表</h2>
-            <span class="badge">套用邏輯：__PATTERN__</span>
+            <h2>__SYMBOL__ - 幾何形態與趨勢線分析</h2>
+            <span class="badge">偵測形態：__PATTERN__</span>
         </div>
 
         <div id="chartContainer"></div>
-        <div class="tip">💡 操作說明：使用滑鼠滾輪/雙指捏合可進行【縮放】，按住圖表可左右【拖動】瀏覽上市至今的所有陰陽燭。</div>
+        <div class="tip">💡 提示：已為你自動繪製【頸線/趨勢線】與關鍵點標註。使用滾輪/雙指可放大縮放檢視細節。</div>
 
         <script>
             const chartDom = document.getElementById('chartContainer');
@@ -143,12 +193,12 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
 
             const dates = __DATES__;
             const data = __CANDLES__;
-            const upperData = __UPPER__;
-            const lowerData = __LOWER__;
+            const markLinesData = __MARK_LINES__;
+            const markPointsData = __MARK_POINTS__;
 
             const option = {
                 backgroundColor: '#1e222d',
-                title: { text: '__SYMBOL__ 全歷史 K 線與自訂幾何通道', left: 10, textStyle: { color: '#d1d4dc', fontSize: 16 } },
+                title: { text: '__SYMBOL__ 陰陽燭 + 自訂幾何形態繪製', left: 10, textStyle: { color: '#d1d4dc', fontSize: 16 } },
                 tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
                 grid: { left: '5%', right: '5%', bottom: '15%' },
                 xAxis: {
@@ -167,8 +217,8 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
                     axisLabel: { color: '#787b86' }
                 },
                 dataZoom: [
-                    { type: 'inside', start: 85, end: 100 },
-                    { show: true, type: 'slider', top: '90%', start: 85, end: 100, textStyle: { color: '#d1d4dc' } }
+                    { type: 'inside', start: 80, end: 100 },
+                    { show: true, type: 'slider', top: '90%', start: 80, end: 100, textStyle: { color: '#d1d4dc' } }
                 ],
                 series: [
                     {
@@ -180,23 +230,17 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
                             color0: '#f23645',
                             borderColor: '#089981',
                             borderColor0: '#f23645'
+                        },
+                        markLine: {
+                            symbol: ['none', 'none'],
+                            data: markLinesData,
+                            label: { show: true, position: 'end', formatter: '{b}' }
+                        },
+                        markPoint: {
+                            data: markPointsData,
+                            symbol: 'pin',
+                            symbolSize: 40
                         }
-                    },
-                    {
-                        name: '自訂幾何上軌線',
-                        type: 'line',
-                        data: upperData,
-                        smooth: true,
-                        showSymbol: false,
-                        lineStyle: { color: '#f23645', width: 2, type: 'dashed' }
-                    },
-                    {
-                        name: '自訂幾何下軌線',
-                        type: 'line',
-                        data: lowerData,
-                        smooth: true,
-                        showSymbol: false,
-                        lineStyle: { color: '#089981', width: 2, type: 'dashed' }
                     }
                 ]
             };
@@ -208,14 +252,12 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
     </html>
     """
 
-    # 進行安全字串替換
     html_content = html_content.replace("__SYMBOL__", symbol)
     html_content = html_content.replace("__PATTERN__", pattern)
-    html_content = html_content.replace("__START_YEAR__", str(start_year))
     html_content = html_content.replace("__DATES__", dates_json)
     html_content = html_content.replace("__CANDLES__", candles_json)
-    html_content = html_content.replace("__UPPER__", upper_json)
-    html_content = html_content.replace("__LOWER__", lower_json)
+    html_content = html_content.replace("__MARK_LINES__", mark_lines_json)
+    html_content = html_content.replace("__MARK_POINTS__", mark_points_json)
 
     return html_content
 
