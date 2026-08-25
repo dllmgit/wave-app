@@ -5,16 +5,18 @@ import json
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="HSI Custom Geometry Engine", version="9.0.0")
+app = FastAPI(title="HSI Custom Geometry Engine", version="10.1.0")
 
+# 恒指成份股矩陣資料
 HSI_CONSTITUENTS = [
-    {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "85.2 億", "volume": "2,350 萬", "matched": True, "pattern": "早晨之星 + 幾何通道趨勢線", "pattern_type": "channel", "start_year": 2004},
-    {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "62.1 億", "volume": "7,800 萬", "matched": True, "pattern": "標準頭肩底結構", "pattern_type": "head_shoulders_bottom", "start_year": 2019},
-    {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "45.8 億", "volume": "4,120 萬", "matched": True, "pattern": "頭肩頂反轉預警", "pattern_type": "head_shoulders_top", "start_year": 2018},
-    {"symbol": "HKEX:0005", "name": "匯豐控股", "turnover": "38.4 億", "volume": "5,600 萬", "matched": False, "pattern": "-", "pattern_type": "none", "start_year": 2000},
-    {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "31.2 億", "volume": "9,200 萬", "matched": True, "pattern": "三角狹窄收斂趨勢線", "pattern_type": "triangle", "start_year": 2018},
-    {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "25.6 億", "volume": "6,300 萬", "matched": True, "pattern": "修復版頭肩底", "pattern_type": "head_shoulders_bottom", "start_year": 2004},
-    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "18.3 億", "volume": "4,500 萬", "matched": True, "pattern": "頭肩頂形態", "pattern_type": "head_shoulders_top", "start_year": 2021}
+    {"symbol": "HKEX:0700", "name": "騰訊控股", "turnover": "125.8 億", "volume": "3,450 萬", "matched": True, "pattern": "早晨之星 + 通道趨勢線", "pattern_type": "channel", "start_year": 2004},
+    {"symbol": "HKEX:9988", "name": "阿里巴巴-SW", "turnover": "82.1 億", "volume": "9,800 萬", "matched": True, "pattern": "標準頭肩底形態 (頸線突破)", "pattern_type": "head_shoulders_bottom", "start_year": 2019},
+    {"symbol": "HKEX:3690", "name": "美團-W", "turnover": "65.8 億", "volume": "5,120 萬", "matched": True, "pattern": "頭肩頂反轉阻力預警", "pattern_type": "head_shoulders_top", "start_year": 2018},
+    {"symbol": "HKEX:1810", "name": "小米集團-W", "turnover": "41.2 億", "volume": "11,200 萬", "matched": True, "pattern": "三角狹窄收斂突破", "pattern_type": "triangle", "start_year": 2018},
+    {"symbol": "HKEX:1024", "name": "快手-W", "turnover": "28.3 億", "volume": "6,500 萬", "matched": True, "pattern": "雙重底 + 頸線支撐", "pattern_type": "head_shoulders_bottom", "start_year": 2021},
+    {"symbol": "HKEX:2318", "name": "中國平安", "turnover": "35.6 億", "volume": "7,300 萬", "matched": True, "pattern": "下降通道轉收斂三角", "pattern_type": "triangle", "start_year": 2004},
+    {"symbol": "HKEX:0005", "name": "匯豐控股", "turnover": "48.4 億", "volume": "6,600 萬", "matched": False, "pattern": "-", "pattern_type": "none", "start_year": 2000},
+    {"symbol": "HKEX:0941", "name": "中國移動", "turnover": "32.1 億", "volume": "4,100 萬", "matched": False, "pattern": "-", "pattern_type": "none", "start_year": 2000}
 ]
 
 def generate_full_history_candles(start_year: int):
@@ -69,7 +71,7 @@ def get_matrix_view():
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>幾何形態矩陣</title>
+        <title>恒指成份股幾何形態矩陣</title>
         <style>
             body {{ font-family: sans-serif; background: #131722; color: #d1d4dc; padding: 20px; }}
             table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; }}
@@ -82,7 +84,7 @@ def get_matrix_view():
         <h2>恒生指數成份股 - 自動繪製幾何趨勢線與形態</h2>
         <table>
             <thead>
-                <tr><th>序號</th><th>代碼</th><th>股票名稱</th><th>歷史區間</th><th>成交額</th><th>符合型態</th><th>操作</th></tr>
+                <tr><th>序號</th><th>代碼</th><th>股票名稱</th><th>上市時間</th><th>日成交額</th><th>偵測型態</th><th>操作</th></tr>
             </thead>
             <tbody>{rows_html}</tbody>
         </table>
@@ -95,23 +97,20 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
     dates, candles = generate_full_history_candles(start_year)
     total_len = len(dates)
 
-    # 幾何趨勢線與型態點陣列 (MarkLines / MarkPoints)
     mark_lines = []
     mark_points = []
 
-    # 根據不同型態生成精緻幾何圖表
+    # 針對不同型態動態計算繪製線段與標註點
     if pattern_type == "head_shoulders_bottom" and total_len > 100:
-        # 頭肩底：左肩、頭、右肩、頸線
+        # 頭肩底：畫頸線 + 標註 左肩、頭、右肩
         idx_ls, idx_h, idx_rs = total_len - 80, total_len - 50, total_len - 20
         p_ls, p_h, p_rs = candles[idx_ls][2], candles[idx_h][2], candles[idx_rs][2]
         p_neck = max(candles[idx_ls][3], candles[idx_rs][3]) * 1.02
 
-        # 1. 畫出頸線 (Neckline)
         mark_lines.append([
-            {"name": "頸線 (Neckline)", "coord": [dates[idx_ls - 10], p_neck], "lineStyle": {"color": "#ff9800", "width": 3, "type": "solid"}},
+            {"name": "頸線突破 (Neckline)", "coord": [dates[idx_ls - 10], p_neck], "lineStyle": {"color": "#ff9800", "width": 3, "type": "solid"}},
             {"coord": [dates[-1], p_neck]}
         ])
-        # 2. 標註 左肩、頭、右肩
         mark_points.extend([
             {"name": "左肩", "coord": [dates[idx_ls], p_ls], "value": "左肩", "itemStyle": {"color": "#2962ff"}},
             {"name": "頭部", "coord": [dates[idx_h], p_h], "value": "頭部", "itemStyle": {"color": "#f23645"}},
@@ -119,23 +118,23 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
         ])
 
     elif pattern_type == "head_shoulders_top" and total_len > 100:
-        # 頭肩頂：左肩、頭、右肩、頸線
+        # 頭肩頂：畫頸線 + 標註 頂點
         idx_ls, idx_h, idx_rs = total_len - 80, total_len - 50, total_len - 20
         p_ls, p_h, p_rs = candles[idx_ls][3], candles[idx_h][3], candles[idx_rs][3]
         p_neck = min(candles[idx_ls][2], candles[idx_rs][2]) * 0.98
 
         mark_lines.append([
-            {"name": "頸線 (Neckline)", "coord": [dates[idx_ls - 10], p_neck], "lineStyle": {"color": "#f23645", "width": 3, "type": "solid"}},
+            {"name": "頸線支撐 (Neckline)", "coord": [dates[idx_ls - 10], p_neck], "lineStyle": {"color": "#f23645", "width": 3, "type": "solid"}},
             {"coord": [dates[-1], p_neck]}
         ])
         mark_points.extend([
-            {"name": "左肩", "coord": [dates[idx_ls], p_ls], "value": "左肩 (頂)", "itemStyle": {"color": "#ff9800"}},
-            {"name": "頭部", "coord": [dates[idx_h], p_h], "value": "頭部 (頂)", "itemStyle": {"color": "#f23645"}},
-            {"name": "右肩", "coord": [dates[idx_rs], p_rs], "value": "右肩 (頂)", "itemStyle": {"color": "#ff9800"}}
+            {"name": "左肩", "coord": [dates[idx_ls], p_ls], "value": "左肩(頂)", "itemStyle": {"color": "#ff9800"}},
+            {"name": "頭頂", "coord": [dates[idx_h], p_h], "value": "頭頂", "itemStyle": {"color": "#f23645"}},
+            {"name": "右肩", "coord": [dates[idx_rs], p_rs], "value": "右肩(頂)", "itemStyle": {"color": "#ff9800"}}
         ])
 
     elif pattern_type == "triangle" and total_len > 100:
-        # 三角收斂趨勢線（上降線 + 上升線）
+        # 三角收斂：畫出相交阻力與支撐線
         idx_start, idx_end = total_len - 120, total_len - 5
         mark_lines.append([
             {"name": "下降阻力趨勢線", "coord": [dates[idx_start], candles[idx_start][3] * 1.05], "lineStyle": {"color": "#f23645", "width": 2}},
@@ -147,15 +146,15 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
         ])
 
     else:
-        # 通道趨勢線 (Channel / Trendline)
+        # 標準通道 (Channel)
         idx_start = max(0, total_len - 200)
         mark_lines.append([
-            {"name": "通道頂部阻力線", "coord": [dates[idx_start], candles[idx_start][3] * 1.04], "lineStyle": {"color": "#f23645", "width": 2, "type": "dashed"}},
-            {"coord": [dates[-1], candles[-1][3] * 1.04]}
+            {"name": "通道頂部阻力線", "coord": [dates[idx_start], candles[idx_start][3] * 1.03], "lineStyle": {"color": "#f23645", "width": 2, "type": "dashed"}},
+            {"coord": [dates[-1], candles[-1][3] * 1.03]}
         ])
         mark_lines.append([
-            {"name": "通道底部支撐線", "coord": [dates[idx_start], candles[idx_start][2] * 0.96], "lineStyle": {"color": "#089981", "width": 2, "type": "dashed"}},
-            {"coord": [dates[-1], candles[-1][2] * 0.96]}
+            {"name": "通道底部支撐線", "coord": [dates[idx_start], candles[idx_start][2] * 0.97], "lineStyle": {"color": "#089981", "width": 2, "type": "dashed"}},
+            {"coord": [dates[-1], candles[-1][2] * 0.97]}
         ])
 
     dates_json = json.dumps(dates)
@@ -168,7 +167,7 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>__SYMBOL__ - 全歷史幾何圖表</title>
+        <title>__SYMBOL__ - 全歷史形態趨勢線</title>
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <style>
             body { font-family: sans-serif; background: #131722; color: #ffffff; padding: 20px; margin: 0; }
@@ -181,11 +180,11 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
     <body>
         <div class="header">
             <h2>__SYMBOL__ - 幾何形態與趨勢線分析</h2>
-            <span class="badge">偵測形態：__PATTERN__</span>
+            <span class="badge">已套用型態：__PATTERN__</span>
         </div>
 
         <div id="chartContainer"></div>
-        <div class="tip">💡 提示：已為你自動繪製【頸線/趨勢線】與關鍵點標註。使用滾輪/雙指可放大縮放檢視細節。</div>
+        <div class="tip">💡 提示：原本上下的固定虛線已取消，現已替換為動態推演的【頸線/趨勢線】與關鍵點標註。</div>
 
         <script>
             const chartDom = document.getElementById('chartContainer');
@@ -198,7 +197,7 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
 
             const option = {
                 backgroundColor: '#1e222d',
-                title: { text: '__SYMBOL__ 陰陽燭 + 自訂幾何形態繪製', left: 10, textStyle: { color: '#d1d4dc', fontSize: 16 } },
+                title: { text: '__SYMBOL__ K 線圖與形態趨勢線', left: 10, textStyle: { color: '#d1d4dc', fontSize: 16 } },
                 tooltip: { trigger: 'axis', axisPointer: { type: 'cross' } },
                 grid: { left: '5%', right: '5%', bottom: '15%' },
                 xAxis: {
@@ -239,7 +238,7 @@ def get_custom_chart(symbol: str = "HKEX:0700", pattern: str = "幾何邏輯分�
                         markPoint: {
                             data: markPointsData,
                             symbol: 'pin',
-                            symbolSize: 40
+                            symbolSize: 42
                         }
                     }
                 ]
