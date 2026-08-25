@@ -1,9 +1,8 @@
 import os
-import json
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
 
-app = FastAPI(title="HSI Constituents Matrix Engine", version="5.0.0")
+app = FastAPI(title="HSI Constituents Matrix Engine", version="5.1.0")
 
 # 恒生指數成份股（藍籌股）清單
 HSI_CONSTITUENTS = [
@@ -105,7 +104,7 @@ def get_matrix_view():
             h2 {{ color: #ffffff; margin: 0; }}
             table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; overflow: hidden; }}
             th, td {{ padding: 12px 16px; text-align: left; border-bottom: 1px solid #2a2e39; font-size: 14px; }}
-            th {{ background: #2a2e39; color: #787b86; uppercase; font-size: 12px; }}
+            th {{ background: #2a2e39; color: #787b86; text-transform: uppercase; font-size: 12px; }}
             tr:hover {{ background: #262b3e; }}
             .btn {{ padding: 6px 12px; border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: bold; display: inline-block; }}
             .btn-custom {{ background: #9c27b0; color: white; }}
@@ -141,19 +140,8 @@ def get_matrix_view():
     return html_content
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:9988"):
+def get_custom_chart(symbol: str = "HKEX:2318"):
     tv_url = generate_tv_url(symbol)
-    
-    candle_data = [
-        {"time": "2026-08-01", "open": 100, "high": 105, "low": 98, "close": 102},
-        {"time": "2026-08-02", "open": 102, "high": 108, "low": 101, "close": 106},
-        {"time": "2026-08-03", "open": 106, "high": 112, "low": 105, "close": 110},
-        {"time": "2026-08-04", "open": 110, "high": 115, "low": 108, "close": 114},
-        {"time": "2026-08-05", "open": 114, "high": 120, "low": 113, "close": 118},
-    ]
-    
-    red_channel_bot = [{"time": "2026-08-01", "value": 98}, {"time": "2026-08-05", "value": 113}]
-    red_channel_top = [{"time": "2026-08-01", "value": 105}, {"time": "2026-08-05", "value": 120}]
 
     html = f"""
     <!DOCTYPE html>
@@ -161,39 +149,41 @@ def get_custom_chart(symbol: str = "HKEX:9988"):
     <head>
         <meta charset="UTF-8">
         <title>自訂邏輯圖表 - {symbol}</title>
-        <script src="https://unpkg.com/lightweight-charts/dist/lightweight-charts.standalone.production.js"></script>
         <style>
-            body {{ font-family: Arial, sans-serif; background: #131722; color: #d1d4dc; padding: 16px; }}
-            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }}
-            #chart {{ width: 100%; height: 650px; border-radius: 8px; border: 1px solid #2a2e39; }}
+            body {{ font-family: Arial, sans-serif; background: #131722; color: #d1d4dc; padding: 16px; margin: 0; }}
+            .header {{ display: flex; justify-content: space-between; align-items: center; padding: 0 0 12px 0; }}
+            .chart-container {{ width: 100%; height: 80vh; }}
             .btn-tv {{ background: #2962ff; color: white; padding: 8px 16px; border-radius: 4px; text-decoration: none; font-weight: bold; }}
         </style>
     </head>
     <body>
         <div class="header">
-            <h2>{symbol} - 依據自訂幾何邏輯自動繪圖</h2>
-            <a href="{tv_url}" target="_blank" class="btn-tv">切換至 TradingView 原生圖表 ↗</a>
+            <h2 style="margin: 0;">{symbol} - 依據自訂幾何邏輯圖表</h2>
+            <a href="{tv_url}" target="_blank" class="btn-tv">切換至 TradingView 原生頁面 ↗</a>
         </div>
-        <div id="chart"></div>
-        <script>
-            const chart = LightweightCharts.createChart(document.getElementById('chart'), {{
-                layout: {{ backgroundColor: '#131722', textColor: '#d1d4dc' }},
-                grid: {{ vertLines: {{ color: '#2a2e39' }}, horzLines: {{ color: '#2a2e39' }} }}
-            }});
-            const candleSeries = chart.addCandlestickSeries();
-            candleSeries.setData({json.dumps(candle_data)});
-            
-            const botSeries = chart.addLineSeries({{ color: '#ff0000', lineWidth: 2 }});
-            botSeries.setData({json.dumps(red_channel_bot)});
-            
-            const topSeries = chart.addLineSeries({{ color: '#ff0000', lineWidth: 2 }});
-            topSeries.setData({json.dumps(red_channel_top)});
-
-            candleSeries.setMarkers([
-                {{ time: '2026-08-01', position: 'belowBar', color: '#089981', shape: 'arrowUp', text: '通道底觸發' }},
-                {{ time: '2026-08-05', position: 'aboveBar', color: '#e91e63', shape: 'arrowDown', text: '通道頂阻力' }}
-            ]);
-        </script>
+        
+        <!-- TradingView 官方 Widget 嵌入區塊 -->
+        <div class="chart-container">
+            <div class="tradingview-widget-container" style="height:100%;width:100%">
+                <div id="tradingview_widget" style="height:100%;width:100%"></div>
+                <script type="text/javascript" src="https://s3.tradingview.com/tv.js"></script>
+                <script type="text/javascript">
+                new TradingView.widget({{
+                    "autosize": true,
+                    "symbol": "{symbol}",
+                    "interval": "D",
+                    "timezone": "Asia/Hong_Kong",
+                    "theme": "dark",
+                    "style": "1",
+                    "locale": "zh_TW",
+                    "toolbar_bg": "#f1f3f6",
+                    "enable_publishing": false,
+                    "allow_symbol_change": true,
+                    "container_id": "tradingview_widget"
+                }});
+                </script>
+            </div>
+        </div>
     </body>
     </html>
     """
