@@ -6,9 +6,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import yfinance as yf
 import numpy as np
 
-app = FastAPI(title="HSI Pattern Detection Engine", version="13.0.0")
+app = FastAPI(title="HSI Pattern Detection Engine", version="14.0.0")
 
-# 恒指成份股列表
 HSI_CONSTITUENTS = [
     {"symbol": "HKEX:9988", "yf_code": "9988.HK", "name": "阿里巴巴-SW"},
     {"symbol": "HKEX:0700", "yf_code": "0700.HK", "name": "騰訊控股"},
@@ -17,48 +16,71 @@ HSI_CONSTITUENTS = [
     {"symbol": "HKEX:0005", "yf_code": "0005.HK", "name": "匯豐控股"}
 ]
 
+# 全域快取，避免頻繁請求 Yahoo Finance 導致被封 IP
+DATA_CACHE = {}
+CACHE_TIMEOUT_SECONDS = 300  # 快取 5 分鐘
+
 def fetch_real_candles(ticker: str):
-    """獲取真實港股日 K 線數據"""
-    df = yf.download(ticker, period="1y", interval="1d")
-    if df.empty:
-        return [], []
+    """獲取真實港股日 K 線數據（含快取與防錯機制）"""
+    now = datetime.datetime.now()
     
-    dates = [d.strftime("%Y-%m-%d") for d in df.index]
-    candles = []
-    for idx, row in df.iterrows():
-        open_p = float(row['Open'])
-        close_p = float(row['Close'])
-        low_p = float(row['Low'])
-        high_p = float(row['High'])
-        candles.append([round(open_p, 2), round(close_p, 2), round(low_p, 2), round(high_p, 2)])
-    return dates, candles
+    # 1. 檢查快取
+    if ticker in DATA_CACHE:
+        cache_entry = DATA_CACHE[ticker]
+        if (now - cache_entry["time"]).total_seconds() < CACHE_TIMEOUT_SECONDS:
+            return cache_entry["dates"], cache_entry["candles"], None
+
+    # 2. 請求 Yahoo Finance 數據
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="1y", interval="1d")
+        
+        if df.empty:
+            # 若無數據，優先嘗試傳回快取舊資料
+            if ticker in DATA_CACHE:
+                return DATA_CACHE[ticker]["dates"], DATA_CACHE[ticker]["candles"], "⚠️ 數據更新頻率過高，暫時顯示快取資料"
+            return [], [], "數據暫時無法載入 (Yahoo Finance API 限制中)"
+
+        dates = [d.strftime("%Y-%m-%d") for d in df.index]
+        candles = []
+        for idx, row in df.iterrows():
+            open_p = float(row['Open'])
+            close_p = float(row['Close'])
+            low_p = float(row['Low'])
+            high_p = float(row['High'])
+            candles.append([round(open_p, 2), round(close_p, 2), round(low_p, 2), round(high_p, 2)])
+
+        # 寫入快取
+        DATA_CACHE[ticker] = {
+            "time": now,
+            "dates": dates,
+            "candles": candles
+        }
+        return dates, candles, None
+
+    except Exception as e:
+        if ticker in DATA_CACHE:
+            return DATA_CACHE[ticker]["dates"], DATA_CACHE[ticker]["candles"], "⚠️ API 暫時被限制，顯示快取資料"
+        return [], [], f"API 存取受限，請稍後再試：{str(e)}"
 
 def detect_patterns(dates, candles):
-    """
-    形態偵測邏輯：
-    1. 優先檢測標準頭肩底
-    2. 若不符合幾何條件，則判定為「無顯著形態」
-    """
+    """形態偵測邏輯"""
     if len(candles) < 90:
         return "無顯著形態", [], []
 
     lows = [c[2] for c in candles]
     highs = [c[3] for c in candles]
 
-    # 取最近 120 天的窗口進行幾何分析
     window_len = min(120, len(candles))
     sub_lows = lows[-window_len:]
     
-    # 尋找全區間最低點作為潛在「頭部」
     head_rel_idx = int(np.argmin(sub_lows))
     head_idx = len(candles) - window_len + head_rel_idx
     p_head = lows[head_idx]
 
-    # 頭部不能太接近圖表邊界（左右必須留有足夠天數形成雙肩）
     if head_rel_idx < 20 or head_rel_idx > window_len - 20:
         return "無顯著形態", [], []
 
-    # 尋找左肩 (頭部左側 15~40 天內的局部低點)
     left_start = max(0, head_idx - 40)
     left_end = head_idx - 10
     if left_end <= left_start:
@@ -67,7 +89,6 @@ def detect_patterns(dates, candles):
     ls_idx = left_start + ls_rel_idx
     p_ls = lows[ls_idx]
 
-    # 尋找右肩 (頭部右側 10~40 天內的局部低點)
     right_start = head_idx + 10
     right_end = min(len(lows), head_idx + 40)
     if right_end <= right_start:
@@ -76,15 +97,11 @@ def detect_patterns(dates, candles):
     rs_idx = right_start + rs_rel_idx
     p_rs = lows[rs_idx]
 
-    # 嚴格幾何門檻校驗：
-    # 1. 頭部必須顯著低於左肩與右肩（至少低 3%）
-    # 2. 左右肩高度差不能太大（不超過 10%）
     if not (p_head < p_ls * 0.97 and p_head < p_rs * 0.97):
         return "無顯著形態", [], []
     if abs(p_ls - p_rs) / min(p_ls, p_rs) > 0.10:
         return "無顯著形態", [], []
 
-    # 計算兩肩之間的反彈高點以連接頸線
     v1_idx = ls_idx + int(np.argmax(highs[ls_idx:head_idx]))
     v2_idx = head_idx + int(np.argmax(highs[head_idx:rs_idx]))
     p_v1 = highs[v1_idx]
@@ -111,7 +128,7 @@ def read_root():
 def get_custom_chart(symbol: str = "HKEX:9988"):
     item = next((x for x in HSI_CONSTITUENTS if x["symbol"] == symbol), HSI_CONSTITUENTS[0])
     
-    dates, candles = fetch_real_candles(item["yf_code"])
+    dates, candles, err_msg = fetch_real_candles(item["yf_code"])
     pattern_name, mark_lines, mark_points = detect_patterns(dates, candles)
 
     dates_json = json.dumps(dates)
@@ -120,6 +137,7 @@ def get_custom_chart(symbol: str = "HKEX:9988"):
     mark_points_json = json.dumps(mark_points)
 
     status_badge = f'<span style="background: #2962ff; padding: 6px 12px; border-radius: 4px;">🎯 偵測型態：{pattern_name}</span>' if pattern_name != "無顯著形態" else '<span style="background: #363a45; color: #9194a1; padding: 6px 12px; border-radius: 4px;">⚪ 當前無顯著幾何形態</span>'
+    warning_banner = f'<div style="background: #e65100; padding: 10px; margin-bottom: 10px; border-radius: 4px;">{err_msg}</div>' if err_msg else ''
 
     return f"""
     <!DOCTYPE html>
@@ -135,6 +153,7 @@ def get_custom_chart(symbol: str = "HKEX:9988"):
         </style>
     </head>
     <body>
+        {warning_banner}
         <div class="header">
             <h2>{symbol} ({item['name']}) - K 線圖分析</h2>
             {status_badge}
