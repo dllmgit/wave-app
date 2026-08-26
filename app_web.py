@@ -2,8 +2,10 @@ import os
 import json
 import datetime
 from fastapi import FastAPI
-from fastapi.responses import HTMLResponse, RedirectResponseimport os
-import json
+from fastapi.responses import HTMLResponse, RedirectResponse
+import yfinance as yf
+import numpy as np
+
 import datetime
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, RedirectResponse
