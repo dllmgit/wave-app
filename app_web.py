@@ -6,9 +6,8 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import yfinance as yf
 import numpy as np
 
-app = FastAPI(title="HSI Full Matrix Pattern Engine", version="15.0.0")
+app = FastAPI(title="HSI Geometric Trend Engine", version="16.0.0")
 
-# 恒生指數核心成份股代表清單 (可隨意擴充)
 HSI_CONSTITUENTS = [
     {"symbol": "HKEX:0700", "yf_code": "0700.HK", "name": "騰訊控股"},
     {"symbol": "HKEX:9988", "yf_code": "9988.HK", "name": "阿里巴巴-SW"},
@@ -22,12 +21,11 @@ HSI_CONSTITUENTS = [
     {"symbol": "HKEX:9618", "yf_code": "9618.HK", "name": "京東集團-SW"}
 ]
 
-# 全域快取與冷卻時間設定 (10分鐘快取)
 DATA_CACHE = {}
 CACHE_TIMEOUT = 600
 
 def fetch_stock_data(ticker: str):
-    """獲取單隻股票真實 K 線數據 (帶快取)"""
+    """獲取真實 K 線數據"""
     now = datetime.datetime.now()
     if ticker in DATA_CACHE:
         entry = DATA_CACHE[ticker]
@@ -57,51 +55,57 @@ def fetch_stock_data(ticker: str):
             return DATA_CACHE[ticker]["dates"], DATA_CACHE[ticker]["candles"]
         return [], []
 
-def analyze_pattern(dates, candles):
-    """幾何形態辨識引擎：有形態才繪製，無形態回傳空標註"""
-    if len(candles) < 90:
+def detect_trend_channels(dates, candles):
+    """幾何分析：自動偵測趨勢通道 (Channel) 與幾何趨勢線"""
+    if len(candles) < 60:
         return "無顯著形態", [], []
 
-    lows = [c[2] for c in candles]
-    highs = [c[3] for c in candles]
+    # 取最近 60 個交易日進行通道回歸
+    recent_dates = dates[-60:]
+    recent_lows = np.array([c[2] for c in candles[-60:]])
+    recent_highs = np.array([c[3] for c in candles[-60:]])
+    x = np.arange(len(recent_lows))
 
-    # 取近 120 日數據計算頭肩底
-    w_len = min(120, len(candles))
-    sub_lows = lows[-w_len:]
-    head_rel = int(np.argmin(sub_lows))
-    head_idx = len(candles) - w_len + head_rel
-    p_head = lows[head_idx]
+    # 計算低點趨勢線 (Lower Support) 與 高點趨勢線 (Upper Resistance)
+    slope_low, intercept_low = np.polyfit(x, recent_lows, 1)
+    slope_high, intercept_high = np.polyfit(x, recent_highs, 1)
 
-    if 20 <= head_rel <= w_len - 20:
-        # 左肩與右肩極值尋找
-        l_range = lows[max(0, head_idx - 40):head_idx - 10]
-        r_range = lows[head_idx + 10:min(len(lows), head_idx + 40)]
-        
-        if l_range and r_range:
-            ls_idx = max(0, head_idx - 40) + int(np.argmin(l_range))
-            rs_idx = head_idx + 10 + int(np.argmin(r_range))
-            p_ls, p_rs = lows[ls_idx], lows[rs_idx]
+    # 平行通道擬合 (平均斜率)
+    avg_slope = (slope_low + slope_high) / 2.0
+    
+    start_date = recent_dates[0]
+    end_date = recent_dates[-1]
 
-            # 幾何條件校驗：頭部顯著低於兩肩
-            if p_head < p_ls * 0.97 and p_head < p_rs * 0.97 and abs(p_ls - p_rs) / min(p_ls, p_rs) <= 0.12:
-                v1_idx = ls_idx + int(np.argmax(highs[ls_idx:head_idx]))
-                v2_idx = head_idx + int(np.argmax(highs[head_idx:rs_idx]))
-                p_v1, p_v2 = highs[v1_idx], highs[v2_idx]
+    # 計算繪線座標
+    y_low_start = round(float(intercept_low), 2)
+    y_low_end = round(float(intercept_low + avg_slope * 59), 2)
+    y_high_start = round(float(intercept_high), 2)
+    y_high_end = round(float(intercept_high + avg_slope * 59), 2)
+    
+    # 中軸線 (Midline)
+    y_mid_start = round((y_low_start + y_high_start) / 2.0, 2)
+    y_mid_end = round((y_low_end + y_high_end) / 2.0, 2)
 
-                mark_lines = [[
-                    {"name": "頸線 (Neckline)", "coord": [dates[v1_idx], p_v1], "lineStyle": {"color": "#2962ff", "width": 2}},
-                    {"coord": [dates[min(len(dates)-1, rs_idx + 25)], p_v2]}
-                ]]
+    mark_lines = [
+        # 上軌阻力線 (粉紅/紅色)
+        [
+            {"name": "通道上軌", "coord": [start_date, y_high_start], "lineStyle": {"color": "#e91e63", "width": 2, "type": "solid"}},
+            {"coord": [end_date, y_high_end]}
+        ],
+        # 下軌支撐線 (粉紅/紅色)
+        [
+            {"name": "通道下軌", "coord": [start_date, y_low_start], "lineStyle": {"color": "#e91e63", "width": 2, "type": "solid"}},
+            {"coord": [end_date, y_low_end]}
+        ],
+        # 中軸趨勢線 (藍色虛線)
+        [
+            {"name": "中軸趨勢", "coord": [start_date, y_mid_start], "lineStyle": {"color": "#2962ff", "width": 1.5, "type": "dashed"}},
+            {"coord": [end_date, y_mid_end]}
+        ]
+    ]
 
-                mark_points = [
-                    {"name": "左肩", "coord": [dates[ls_idx], p_ls], "value": "左肩", "itemStyle": {"color": "#089981"}},
-                    {"name": "頭部", "coord": [dates[head_idx], p_head], "value": "頭部", "itemStyle": {"color": "#f23645"}},
-                    {"name": "右肩", "coord": [dates[rs_idx], p_rs], "value": "右肩", "itemStyle": {"color": "#089981"}}
-                ]
-
-                return "標準頭肩底形態", mark_lines, mark_points
-
-    return "無顯著形態", [], []
+    pattern_type = "上升通道 (Ascending Channel)" if avg_slope > 0.05 else ("下降通道 (Descending Channel)" if avg_slope < -0.05 else "矩形整理通道")
+    return pattern_type, mark_lines, []
 
 @app.get("/")
 def read_root():
@@ -109,13 +113,12 @@ def read_root():
 
 @app.get("/matrix", response_class=HTMLResponse)
 def get_matrix_view():
-    """主頁：恒指成份股幾何形態矩陣面板"""
     rows_html = ""
     for rank, item in enumerate(HSI_CONSTITUENTS, 1):
         dates, candles = fetch_stock_data(item["yf_code"])
-        pattern_name, _, _ = analyze_pattern(dates, candles)
+        pattern_name, _, _ = detect_trend_channels(dates, candles)
         
-        status_tag = f'<span style="color: #089981; font-weight: bold;">✅ {pattern_name}</span>' if pattern_name != "無顯著形態" else '<span style="color: #787b86;">⚪ 無顯著形態</span>'
+        status_tag = f'<span style="color: #089981; font-weight: bold;">📈 {pattern_name}</span>'
         chart_url = f"/custom-chart?symbol={item['symbol']}"
 
         rows_html += f"""
@@ -124,9 +127,7 @@ def get_matrix_view():
             <td style="font-weight: bold; color: #2962ff;">{item['symbol']}</td>
             <td style="font-weight: bold; color: #ffffff;">{item['name']}</td>
             <td>{status_tag}</td>
-            <td>
-                <a href="{chart_url}" class="btn-link">🎨 查看圖表與趨勢線</a>
-            </td>
+            <td><a href="{chart_url}" class="btn-link">🎨 查看圖表與趨勢線</a></td>
         </tr>
         """
 
@@ -148,7 +149,7 @@ def get_matrix_view():
         </style>
     </head>
     <body>
-        <h2>恒生指數成份股 - 自動幾何形態監測矩陣</h2>
+        <h2>恒生指數成份股 - 自動趨勢通道與幾何圖表</h2>
         <table>
             <thead>
                 <tr>
@@ -159,29 +160,24 @@ def get_matrix_view():
                     <th>操作</th>
                 </tr>
             </thead>
-            <tbody>
-                {rows_html}
-            </tbody>
+            <tbody>{rows_html}</tbody>
         </table>
     </body>
     </html>
     """
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:9988"):
-    """單隻股票詳情 K 線圖"""
+def get_custom_chart(symbol: str = "HKEX:0700"):
     item = next((x for x in HSI_CONSTITUENTS if x["symbol"] == symbol), HSI_CONSTITUENTS[0])
     dates, candles = fetch_stock_data(item["yf_code"])
-    pattern_name, mark_lines, mark_points = analyze_pattern(dates, candles)
-
-    badge = f'<span style="background: #2962ff; padding: 6px 12px; border-radius: 4px;">🎯 偵測型態：{pattern_name}</span>' if pattern_name != "無顯著形態" else '<span style="background: #363a45; color: #9194a1; padding: 6px 12px; border-radius: 4px;">⚪ 無顯著幾何形態</span>'
+    pattern_name, mark_lines, mark_points = detect_trend_channels(dates, candles)
 
     return f"""
     <!DOCTYPE html>
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>{symbol} - K線幾何圖表</title>
+        <title>{symbol} - 幾何趨勢通道</title>
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <style>
             body {{ font-family: sans-serif; background: #131722; color: #ffffff; padding: 20px; margin: 0; }}
@@ -193,8 +189,8 @@ def get_custom_chart(symbol: str = "HKEX:9988"):
     <body>
         <a href="/matrix" class="back-btn">⬅️ 返回成份股矩陣列表</a>
         <div class="header">
-            <h2>{symbol} ({item['name']}) - K 線圖分析</h2>
-            {badge}
+            <h2>{symbol} ({item['name']}) - K 線趨勢線分析</h2>
+            <span style="background: #2962ff; padding: 6px 12px; border-radius: 4px;">🎯 偵測型態：{pattern_name}</span>
         </div>
         <div id="chartContainer"></div>
         <script>
@@ -207,14 +203,22 @@ def get_custom_chart(symbol: str = "HKEX:9988"):
                 grid: {{ left: '5%', right: '5%', bottom: '15%' }},
                 xAxis: {{ type: 'category', data: {json.dumps(dates)}, scale: true, boundaryGap: false }},
                 yAxis: {{ scale: true, splitLine: {{ lineStyle: {{ color: '#2a2e39' }} }} }},
-                dataZoom: [{{ type: 'inside', start: 50, end: 100 }}, {{ show: true, type: 'slider', top: '90%' }}],
+                dataZoom: [{{ type: 'inside', start: 40, end: 100 }}, {{ show: true, type: 'slider', top: '90%' }}],
                 series: [{{
                     name: '日 K 線',
                     type: 'candlestick',
                     data: {json.dumps(candles)},
-                    itemStyle: {{ color: '#089981', color0: '#f23645', borderColor: '#089981', borderColor0: '#f23645' }},
-                    markLine: {{ symbol: ['none', 'none'], data: {json.dumps(mark_lines)} }},
-                    markPoint: {{ data: {json.dumps(mark_points)}, symbol: 'pin', symbolSize: 40 }}
+                    // 配色更換：綠升紅跌（TradingView 港股標準樣式）
+                    itemStyle: {{ 
+                        color: '#089981', 
+                        color0: '#f23645', 
+                        borderColor: '#089981', 
+                        borderColor0: '#f23645' 
+                    }},
+                    markLine: {{ 
+                        symbol: ['none', 'none'], 
+                        data: {json.dumps(mark_lines)} 
+                    }}
                 }}]
             }};
             myChart.setOption(option);
