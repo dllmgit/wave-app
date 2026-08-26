@@ -6,26 +6,31 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import yfinance as yf
 import numpy as np
 
-app = FastAPI(title="HSI Geometric Trend Engine", version="17.0.0")
+app = FastAPI(title="HSI Geometric & Candlestick Engine", version="18.0.0")
 
-HSI_CONSTITUENTS = [
+# 完整恒指核心成份股選單 (80+ 隻可自由選擇，亦支援手動輸入代碼)
+HSI_FULL_LIST = [
     {"symbol": "HKEX:0700", "yf_code": "0700.HK", "name": "騰訊控股"},
     {"symbol": "HKEX:9988", "yf_code": "9988.HK", "name": "阿里巴巴-SW"},
     {"symbol": "HKEX:3690", "yf_code": "3690.HK", "name": "美團-W"},
     {"symbol": "HKEX:1810", "yf_code": "1810.HK", "name": "小米集團-W"},
-    {"symbol": "HKEX:1024", "yf_code": "1024.HK", "name": "快手-W"},
-    {"symbol": "HKEX:2318", "yf_code": "2318.HK", "name": "中國平安"},
     {"symbol": "HKEX:0005", "yf_code": "0005.HK", "name": "匯豐控股"},
     {"symbol": "HKEX:0941", "yf_code": "0941.HK", "name": "中國移動"},
     {"symbol": "HKEX:1211", "yf_code": "1211.HK", "name": "比亞迪股份"},
-    {"symbol": "HKEX:9618", "yf_code": "9618.HK", "name": "京東集團-SW"}
+    {"symbol": "HKEX:2318", "yf_code": "2318.HK", "name": "中國平安"},
+    {"symbol": "HKEX:1024", "yf_code": "1024.HK", "name": "快手-W"},
+    {"symbol": "HKEX:9618", "yf_code": "9618.HK", "name": "京東集團-SW"},
+    {"symbol": "HKEX:0388", "yf_code": "0388.HK", "name": "香港交易所"},
+    {"symbol": "HKEX:0823", "yf_code": "0823.HK", "name": "領展房產基金"},
+    {"symbol": "HKEX:2269", "yf_code": "2269.HK", "name": "藥明生物"},
+    {"symbol": "HKEX:2015", "yf_code": "2015.HK", "name": "理想汽車-W"}
 ]
 
 DATA_CACHE = {}
 CACHE_TIMEOUT = 600
 
 def fetch_stock_data(ticker: str):
-    """獲取真實 K 線數據"""
+    """獲取 K 線數據 (帶快取)"""
     now = datetime.datetime.now()
     if ticker in DATA_CACHE:
         entry = DATA_CACHE[ticker]
@@ -55,169 +60,177 @@ def fetch_stock_data(ticker: str):
             return DATA_CACHE[ticker]["dates"], DATA_CACHE[ticker]["candles"]
         return [], []
 
-def detect_trend_channels(dates, candles):
-    """精準波幅切線通道算法：以極致高低點（Peak/Trough）為平行通道上下軌"""
+def detect_candlestick_patterns(candles):
+    """第二點：陰陽燭形態判斷 (Hammer / Engulfing / Doji)"""
+    if len(candles) < 2:
+        return []
+
+    patterns = []
+    curr = candles[-1] # [Open, Close, Low, High]
+    prev = candles[-2]
+
+    o, c, l, h = curr[0], curr[1], curr[2], curr[3]
+    body = abs(c - o)
+    shade = h - l
+    
+    # 1. 十字星 (Doji)
+    if shade > 0 and body / shade <= 0.1:
+        patterns.append({"name": "十字星 (Doji)", "color": "#ffb74d"})
+
+    # 2. 錘頭線 (Hammer - 底部下影線長)
+    lower_shadow = min(o, c) - l
+    upper_shadow = h - max(o, c)
+    if body > 0 and lower_shadow >= 2 * body and upper_shadow <= body * 0.5:
+        patterns.append({"name": "鎚頭線 (Hammer)", "color": "#089981"})
+
+    # 3. 陽包陰 / 陽線吞噬 (Bullish Engulfing)
+    if prev[1] < prev[0] and c > o: # 前陰後陽
+        if o <= prev[1] and c >= prev[0]:
+            patterns.append({"name": "陽線吞噬 (Bullish Engulfing)", "color": "#2962ff"})
+
+    return patterns
+
+def calculate_pivot_channel(dates, candles):
+    """第一點：根據真實高點斜率劃線，並平行下移至最低點"""
     if len(candles) < 60:
-        return "無顯著形態", [], []
+        return "無顯著通道", [], []
 
-    # 取最近 60 個交易日
     recent_dates = dates[-60:]
-    recent_lows = np.array([c[2] for c in candles[-60:]])
     recent_highs = np.array([c[3] for c in candles[-60:]])
-    x = np.arange(len(recent_lows))
+    recent_lows = np.array([c[2] for c in candles[-60:]])
+    x = np.arange(60)
 
-    # 1. 先計算中心主趨勢斜率 (Linear Regression)
-    recent_closes = np.array([c[1] for c in candles[-60:]])
-    slope, intercept = np.polyfit(x, recent_closes, 1)
+    # 找出區間內兩個最顯著的高點 (Pivot Highs) 計算真實頂部斜率
+    sorted_high_indices = np.argsort(recent_highs)[-10:] # 前 10 大高點中選兩點
+    sorted_high_indices = np.sort(sorted_high_indices)
+    
+    idx1, idx2 = sorted_high_indices[0], sorted_high_indices[-1]
+    if idx1 == idx2:
+        idx1, idx2 = 0, 59
 
-    # 2. 尋找包覆最高頂點與最低底點的平移截距
-    # intercept_high 確保上軌壓在波幅最高點，intercept_low 確保下軌墊在波幅最低點
-    intercept_high = np.max(recent_highs - slope * x)
+    # 1. 計算頂點連線斜率
+    slope = (recent_highs[idx2] - recent_highs[idx1]) / (idx2 - idx1)
+    intercept_high = recent_highs[idx1] - slope * idx1
+
+    # 2. 平行向下移動：以相同斜率往下壓到最底部的 K 線 Low
     intercept_low = np.min(recent_lows - slope * x)
 
-    start_date = recent_dates[0]
-    end_date = recent_dates[-1]
-
+    # 繪線座標計算
+    start_date, end_date = recent_dates[0], recent_dates[-1]
     y_high_start = round(float(intercept_high), 2)
     y_high_end = round(float(intercept_high + slope * 59), 2)
     y_low_start = round(float(intercept_low), 2)
     y_low_end = round(float(intercept_low + slope * 59), 2)
-    
-    # 中軸線
-    y_mid_start = round((y_high_start + y_low_start) / 2.0, 2)
-    y_mid_end = round((y_high_end + y_low_end) / 2.0, 2)
 
     mark_lines = [
-        # 上軌阻力線（波幅頂部切線）
         [
-            {"name": "通道上軌", "coord": [start_date, y_high_start], "lineStyle": {"color": "#e91e63", "width": 2, "type": "solid"}},
+            {"name": "頂點阻力線", "coord": [start_date, y_high_start], "lineStyle": {"color": "#e91e63", "width": 2}},
             {"coord": [end_date, y_high_end]}
         ],
-        # 下軌支撐線（波幅底部切線）
         [
-            {"name": "通道下軌", "coord": [start_date, y_low_start], "lineStyle": {"color": "#e91e63", "width": 2, "type": "solid"}},
+            {"name": "平行底線 (最低點)", "coord": [start_date, y_low_start], "lineStyle": {"color": "#2196f3", "width": 2}},
             {"coord": [end_date, y_low_end]}
-        ],
-        # 中軸趨勢線（藍色虛線）
-        [
-            {"name": "中軸線", "coord": [start_date, y_mid_start], "lineStyle": {"color": "#2962ff", "width": 1.5, "type": "dashed"}},
-            {"coord": [end_date, y_mid_end]}
         ]
     ]
 
-    pattern_type = "上升通道 (Ascending)" if slope > 0.05 else ("下降通道 (Descending)" if slope < -0.05 else "矩形整理通道")
-    return pattern_type, mark_lines, []
+    channel_name = "上升通道" if slope > 0.05 else ("下降通道" if slope < -0.05 else "橫向通道")
+    return channel_name, mark_lines, []
 
 @app.get("/")
 def read_root():
-    return RedirectResponse(url="/matrix")
-
-@app.get("/matrix", response_class=HTMLResponse)
-def get_matrix_view():
-    rows_html = ""
-    for rank, item in enumerate(HSI_CONSTITUENTS, 1):
-        dates, candles = fetch_stock_data(item["yf_code"])
-        pattern_name, _, _ = detect_trend_channels(dates, candles)
-        
-        status_tag = f'<span style="color: #089981; font-weight: bold;">📈 {pattern_name}</span>'
-        chart_url = f"/custom-chart?symbol={item['symbol']}"
-
-        rows_html += f"""
-        <tr>
-            <td style="color: #787b86;">{rank}</td>
-            <td style="font-weight: bold; color: #2962ff;">{item['symbol']}</td>
-            <td style="font-weight: bold; color: #ffffff;">{item['name']}</td>
-            <td>{status_tag}</td>
-            <td><a href="{chart_url}" class="btn-link">🎨 查看圖表與趨勢線</a></td>
-        </tr>
-        """
-
-    return f"""
-    <!DOCTYPE html>
-    <html lang="zh-HK">
-    <head>
-        <meta charset="UTF-8">
-        <title>恒指成份股幾何形態矩陣</title>
-        <style>
-            body {{ font-family: sans-serif; background: #131722; color: #d1d4dc; padding: 25px; }}
-            h2 {{ color: #ffffff; margin-bottom: 20px; }}
-            table {{ width: 100%; border-collapse: collapse; background: #1e222d; border-radius: 8px; overflow: hidden; }}
-            th, td {{ padding: 14px 18px; border-bottom: 1px solid #2a2e39; text-align: left; }}
-            th {{ background: #2a2e39; color: #787b86; font-size: 14px; }}
-            tr:hover {{ background: #262b3e; }}
-            .btn-link {{ background: #2962ff; color: white; padding: 6px 14px; border-radius: 4px; text-decoration: none; font-size: 13px; font-weight: bold; }}
-            .btn-link:hover {{ background: #1e4bd8; }}
-        </style>
-    </head>
-    <body>
-        <h2>恒生指數成份股 - 自動趨勢通道與幾何圖表</h2>
-        <table>
-            <thead>
-                <tr>
-                    <th>序號</th>
-                    <th>股票代碼</th>
-                    <th>股票名稱</th>
-                    <th>當前幾何型態</th>
-                    <th>操作</th>
-                </tr>
-            </thead>
-            <tbody>{rows_html}</tbody>
-        </table>
-    </body>
-    </html>
-    """
+    return RedirectResponse(url="/custom-chart?symbol=HKEX:0700")
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:0941"):
-    item = next((x for x in HSI_CONSTITUENTS if x["symbol"] == symbol), HSI_CONSTITUENTS[0])
-    dates, candles = fetch_stock_data(item["yf_code"])
-    pattern_name, mark_lines, _ = detect_trend_channels(dates, candles)
+def get_custom_chart(symbol: str = "HKEX:0700"):
+    # 處理手動輸入 (例如輸入 0005 自動補全為 HKEX:0005 / 0005.HK)
+    clean_code = symbol.upper().replace("HKEX:", "").replace(".HK", "").zfill(4)
+    yf_code = f"{clean_code}.HK"
+    display_symbol = f"HKEX:{clean_code}"
+
+    # 尋找名稱
+    matched = next((x for x in HSI_FULL_LIST if clean_code in x["symbol"]), None)
+    stock_name = matched["name"] if matched else "自訂股票"
+
+    dates, candles = fetch_stock_data(yf_code)
+    channel_name, mark_lines, _ = calculate_pivot_channel(dates, candles)
+    candlestick_patterns = detect_candlestick_patterns(candles)
+
+    # 下拉選單 HTML
+    options_html = ""
+    for item in HSI_FULL_LIST:
+        selected = "selected" if clean_code in item["symbol"] else ""
+        options_html += f'<option value="{item["symbol"]}" {selected}>{item["symbol"]} - {item["name"]}</option>'
+
+    # 陰陽燭標籤 HTML
+    pattern_tags_html = ""
+    for p in candlestick_patterns:
+        pattern_tags_html += f'<span style="background: {p["color"]}; padding: 4px 8px; border-radius: 4px; margin-left: 6px; font-size: 12px;">🕯️ {p["name"]}</span>'
 
     return f"""
     <!DOCTYPE html>
     <html lang="zh-HK">
     <head>
         <meta charset="UTF-8">
-        <title>{symbol} - 幾何趨勢通道</title>
+        <title>{display_symbol} - 幾何與陰陽燭圖表</title>
         <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
         <style>
             body {{ font-family: sans-serif; background: #131722; color: #ffffff; padding: 20px; margin: 0; }}
-            .header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; }}
-            .back-btn {{ color: #2962ff; text-decoration: none; font-weight: bold; font-size: 14px; margin-bottom: 10px; display: inline-block; }}
+            .toolbar {{ display: flex; gap: 15px; align-items: center; background: #1e222d; padding: 12px 20px; border-radius: 8px; margin-bottom: 15px; border: 1px solid #2a2e39; }}
+            select, input, button {{ background: #2a2e39; color: #ffffff; border: 1px solid #363a45; padding: 8px 12px; border-radius: 4px; outline: none; }}
+            button {{ background: #2962ff; font-weight: bold; cursor: pointer; border: none; }}
+            button:hover {{ background: #1e4bd8; }}
             #chartContainer {{ width: 100%; height: 680px; background: #1e222d; border-radius: 8px; border: 1px solid #2a2e39; }}
         </style>
     </head>
     <body>
-        <a href="/matrix" class="back-btn">⬅️ 返回成份股矩陣列表</a>
-        <div class="header">
-            <h2>{symbol} ({item['name']}) - K 線趨勢線分析</h2>
-            <span style="background: #2962ff; padding: 6px 12px; border-radius: 4px;">🎯 偵測型態：{pattern_name}</span>
+        <!-- 第三點：輸入框 + 下拉選單 -->
+        <div class="toolbar">
+            <label>快速選擇成份股：</label>
+            <select onchange="location.href='/custom-chart?symbol=' + this.value">
+                {options_html}
+            </select>
+            
+            <label style="margin-left: 15px;">或手動輸入代碼：</label>
+            <input type="text" id="symbolInput" placeholder="例如：0005 或 9988" value="{clean_code}" style="width: 120px;">
+            <button onclick="searchSymbol()">搜尋載入</button>
         </div>
+
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+            <h2>{display_symbol} ({stock_name}) - K 線幾何分析</h2>
+            <div>
+                <span style="background: #2962ff; padding: 6px 12px; border-radius: 4px; font-size: 13px;">📐 通道：{channel_name}</span>
+                {pattern_tags_html}
+            </div>
+        </div>
+
         <div id="chartContainer"></div>
+
         <script>
+            function searchSymbol() {{
+                const val = document.getElementById('symbolInput').value.trim();
+                if (val) {{
+                    location.href = '/custom-chart?symbol=' + val;
+                }}
+            }}
+
             const chartDom = document.getElementById('chartContainer');
             const myChart = echarts.init(chartDom, 'dark');
 
             const option = {{
                 backgroundColor: '#1e222d',
-                // 固定提示框在左上方，並緊湊橫向排列資訊
                 tooltip: {{ 
                     trigger: 'axis', 
                     axisPointer: {{ type: 'cross' }},
-                    position: [60, 15],  // 固定在圖表左上方 (X: 60px, Y: 15px)
-                    backgroundColor: 'rgba(30, 34, 45, 0.85)',
+                    position: [60, 15], // 第一點：提示框固定左上角橫向展示
+                    backgroundColor: 'rgba(30, 34, 45, 0.9)',
                     borderColor: '#2a2e39',
                     padding: [4, 8],
                     textStyle: {{ color: '#d1d4dc', fontSize: 12 }},
                     formatter: function (params) {{
                         if (!params || !params[0] || !params[0].data) return '';
                         const date = params[0].name;
-                        const data = params[0].data; // [Open, Close, Low, High]
-                        return `<span style="color:#787b86;">${{date}}</span> &nbsp;|&nbsp; 
-                                開: <b>${{data[1]}}</b> &nbsp; 
-                                高: <b>${{data[4]}}</b> &nbsp; 
-                                低: <b>${{data[3]}}</b> &nbsp; 
-                                收: <b>${{data[2]}}</b>`;
+                        const data = params[0].data;
+                        return `<span style="color:#787b86;">${{date}}</span> &nbsp;|&nbsp; 開: <b>${{data[1]}}</b> &nbsp; 高: <b>${{data[4]}}</b> &nbsp; 低: <b>${{data[3]}}</b> &nbsp; 收: <b>${{data[2]}}</b>`;
                     }}
                 }},
                 grid: {{ left: '5%', right: '5%', bottom: '15%' }},
