@@ -6,7 +6,7 @@ from fastapi.responses import HTMLResponse, RedirectResponse
 import yfinance as yf
 import numpy as np
 
-app = FastAPI(title="HSI Geometric Trend Engine", version="16.0.0")
+app = FastAPI(title="HSI Geometric Trend Engine", version="17.0.0")
 
 HSI_CONSTITUENTS = [
     {"symbol": "HKEX:0700", "yf_code": "0700.HK", "name": "騰訊控股"},
@@ -56,55 +56,56 @@ def fetch_stock_data(ticker: str):
         return [], []
 
 def detect_trend_channels(dates, candles):
-    """幾何分析：自動偵測趨勢通道 (Channel) 與幾何趨勢線"""
+    """精準波幅切線通道算法：以極致高低點（Peak/Trough）為平行通道上下軌"""
     if len(candles) < 60:
         return "無顯著形態", [], []
 
-    # 取最近 60 個交易日進行通道回歸
+    # 取最近 60 個交易日
     recent_dates = dates[-60:]
     recent_lows = np.array([c[2] for c in candles[-60:]])
     recent_highs = np.array([c[3] for c in candles[-60:]])
     x = np.arange(len(recent_lows))
 
-    # 計算低點趨勢線 (Lower Support) 與 高點趨勢線 (Upper Resistance)
-    slope_low, intercept_low = np.polyfit(x, recent_lows, 1)
-    slope_high, intercept_high = np.polyfit(x, recent_highs, 1)
+    # 1. 先計算中心主趨勢斜率 (Linear Regression)
+    recent_closes = np.array([c[1] for c in candles[-60:]])
+    slope, intercept = np.polyfit(x, recent_closes, 1)
 
-    # 平行通道擬合 (平均斜率)
-    avg_slope = (slope_low + slope_high) / 2.0
-    
+    # 2. 尋找包覆最高頂點與最低底點的平移截距
+    # intercept_high 確保上軌壓在波幅最高點，intercept_low 確保下軌墊在波幅最低點
+    intercept_high = np.max(recent_highs - slope * x)
+    intercept_low = np.min(recent_lows - slope * x)
+
     start_date = recent_dates[0]
     end_date = recent_dates[-1]
 
-    # 計算繪線座標
-    y_low_start = round(float(intercept_low), 2)
-    y_low_end = round(float(intercept_low + avg_slope * 59), 2)
     y_high_start = round(float(intercept_high), 2)
-    y_high_end = round(float(intercept_high + avg_slope * 59), 2)
+    y_high_end = round(float(intercept_high + slope * 59), 2)
+    y_low_start = round(float(intercept_low), 2)
+    y_low_end = round(float(intercept_low + slope * 59), 2)
     
-    # 中軸線 (Midline)
-    y_mid_start = round((y_low_start + y_high_start) / 2.0, 2)
-    y_mid_end = round((y_low_end + y_high_end) / 2.0, 2)
+    # 中軸線
+    y_mid_start = round((y_high_start + y_low_start) / 2.0, 2)
+    y_mid_end = round((y_high_end + y_low_end) / 2.0, 2)
 
     mark_lines = [
-        # 上軌阻力線 (粉紅/紅色)
+        # 上軌阻力線（波幅頂部切線）
         [
             {"name": "通道上軌", "coord": [start_date, y_high_start], "lineStyle": {"color": "#e91e63", "width": 2, "type": "solid"}},
             {"coord": [end_date, y_high_end]}
         ],
-        # 下軌支撐線 (粉紅/紅色)
+        # 下軌支撐線（波幅底部切線）
         [
             {"name": "通道下軌", "coord": [start_date, y_low_start], "lineStyle": {"color": "#e91e63", "width": 2, "type": "solid"}},
             {"coord": [end_date, y_low_end]}
         ],
-        # 中軸趨勢線 (藍色虛線)
+        # 中軸趨勢線（藍色虛線）
         [
-            {"name": "中軸趨勢", "coord": [start_date, y_mid_start], "lineStyle": {"color": "#2962ff", "width": 1.5, "type": "dashed"}},
+            {"name": "中軸線", "coord": [start_date, y_mid_start], "lineStyle": {"color": "#2962ff", "width": 1.5, "type": "dashed"}},
             {"coord": [end_date, y_mid_end]}
         ]
     ]
 
-    pattern_type = "上升通道 (Ascending Channel)" if avg_slope > 0.05 else ("下降通道 (Descending Channel)" if avg_slope < -0.05 else "矩形整理通道")
+    pattern_type = "上升通道 (Ascending)" if slope > 0.05 else ("下降通道 (Descending)" if slope < -0.05 else "矩形整理通道")
     return pattern_type, mark_lines, []
 
 @app.get("/")
@@ -167,10 +168,10 @@ def get_matrix_view():
     """
 
 @app.get("/custom-chart", response_class=HTMLResponse)
-def get_custom_chart(symbol: str = "HKEX:0700"):
+def get_custom_chart(symbol: str = "HKEX:0941"):
     item = next((x for x in HSI_CONSTITUENTS if x["symbol"] == symbol), HSI_CONSTITUENTS[0])
     dates, candles = fetch_stock_data(item["yf_code"])
-    pattern_name, mark_lines, mark_points = detect_trend_channels(dates, candles)
+    pattern_name, mark_lines, _ = detect_trend_channels(dates, candles)
 
     return f"""
     <!DOCTYPE html>
@@ -199,7 +200,26 @@ def get_custom_chart(symbol: str = "HKEX:0700"):
 
             const option = {{
                 backgroundColor: '#1e222d',
-                tooltip: {{ trigger: 'axis', axisPointer: {{ type: 'cross' }} }},
+                // 固定提示框在左上方，並緊湊橫向排列資訊
+                tooltip: {{ 
+                    trigger: 'axis', 
+                    axisPointer: {{ type: 'cross' }},
+                    position: [60, 15],  // 固定在圖表左上方 (X: 60px, Y: 15px)
+                    backgroundColor: 'rgba(30, 34, 45, 0.85)',
+                    borderColor: '#2a2e39',
+                    padding: [4, 8],
+                    textStyle: {{ color: '#d1d4dc', fontSize: 12 }},
+                    formatter: function (params) {{
+                        if (!params || !params[0] || !params[0].data) return '';
+                        const date = params[0].name;
+                        const data = params[0].data; // [Open, Close, Low, High]
+                        return `<span style="color:#787b86;">${{date}}</span> &nbsp;|&nbsp; 
+                                開: <b>${{data[1]}}</b> &nbsp; 
+                                高: <b>${{data[4]}}</b> &nbsp; 
+                                低: <b>${{data[3]}}</b> &nbsp; 
+                                收: <b>${{data[2]}}</b>`;
+                    }}
+                }},
                 grid: {{ left: '5%', right: '5%', bottom: '15%' }},
                 xAxis: {{ type: 'category', data: {json.dumps(dates)}, scale: true, boundaryGap: false }},
                 yAxis: {{ scale: true, splitLine: {{ lineStyle: {{ color: '#2a2e39' }} }} }},
@@ -208,7 +228,6 @@ def get_custom_chart(symbol: str = "HKEX:0700"):
                     name: '日 K 線',
                     type: 'candlestick',
                     data: {json.dumps(candles)},
-                    // 配色更換：綠升紅跌（TradingView 港股標準樣式）
                     itemStyle: {{ 
                         color: '#089981', 
                         color0: '#f23645', 
